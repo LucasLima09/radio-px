@@ -1,0 +1,20 @@
+# Binários e artefatos
+bin/
+tmp/
+
+# Ambiente
+.env
+
+# Go
+*.exe
+*.test
+*.out
+
+# IDEs e editores
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+air.log

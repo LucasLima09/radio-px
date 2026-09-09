@@ -1,0 +1,23 @@
+# Vim-based Air configuration for hot reload.
+# Docs: https://github.com/air-verse/air
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main ./cmd/server"
+  bin = "./tmp/main"
+  include_ext = ["go", "toml", "sql", "env", "mod", "sum"]
+  exclude_dir = ["tmp"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 800
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 500
+  log = "air.log"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true
