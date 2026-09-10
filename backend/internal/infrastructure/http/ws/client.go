@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -19,10 +20,13 @@ var errNoReceivePeer = errors.New("receive peer connection is not ready")
 // while an answer is pending set the dirty flag so a follow-up offer is sent
 // as soon as the pending answer arrives.
 type recvSignaling struct {
-	pc           *webrtc.PeerConnection
-	mu           sync.Mutex
-	pendingOffer bool
-	dirty        bool
+	pc              *webrtc.PeerConnection
+	mu              sync.Mutex
+	pendingOffer    bool
+	dirty           bool
+	offerSent       bool
+	pendingICE      []*ICECandidateMsg
+	pendingRemoteICE []webrtc.ICECandidateInit
 }
 
 type Client struct {
@@ -39,6 +43,7 @@ type Client struct {
 
 	pubMu     sync.Mutex
 	publishPC *webrtc.PeerConnection
+	pendingPublishICE []webrtc.ICECandidateInit
 
 	closeOnce sync.Once
 }
@@ -87,9 +92,18 @@ func (c *Client) setupReceivePC() error {
 		return err
 	}
 	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
+		c.recv.mu.Lock()
+		if !c.recv.offerSent {
+			c.recv.pendingICE = append(c.recv.pendingICE, wireCandidate(cand))
+			c.recv.mu.Unlock()
+			return
+		}
+		c.recv.mu.Unlock()
+		logCandidate("recv local", cand, c.user.Username)
 		c.send(outboundMessage{Type: msgICE, Target: targetReceive, Candidate: wireCandidate(cand)})
 	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		slog.Info("recv conn state", "user", c.user.Username, "state", state.String())
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			c.close()
 		}
@@ -101,6 +115,9 @@ func (c *Client) setupReceivePC() error {
 	}
 	c.recv.pc = pc
 	c.recv.pendingOffer = true
+	c.recv.offerSent = false
+	c.recv.pendingICE = nil
+	c.recv.pendingRemoteICE = nil
 	c.recv.mu.Unlock()
 
 	c.sendRecvOffer()
@@ -118,6 +135,15 @@ func (c *Client) sendRecvOffer() {
 		return
 	}
 	c.send(outboundMessage{Type: msgOffer, Target: targetReceive, SDP: offer.SDP})
+
+	c.recv.mu.Lock()
+	c.recv.offerSent = true
+	pending := c.recv.pendingICE
+	c.recv.pendingICE = nil
+	c.recv.mu.Unlock()
+	for _, cand := range pending {
+		c.send(outboundMessage{Type: msgICE, Target: targetReceive, Candidate: cand})
+	}
 }
 
 func (c *Client) renegotiateRecv() {
@@ -158,6 +184,13 @@ func (c *Client) handleRecvAnswer(sdp string) {
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}); err != nil {
 		return
 	}
+	c.recv.mu.Lock()
+	pending := c.recv.pendingRemoteICE
+	c.recv.pendingRemoteICE = nil
+	c.recv.mu.Unlock()
+	for _, init := range pending {
+		_ = pc.AddICECandidate(init)
+	}
 	if dirty {
 		c.renegotiateRecv()
 	}
@@ -193,6 +226,7 @@ func (c *Client) handlePublishOffer(sdp string) {
 		return
 	}
 	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
+		logCandidate("publish local", cand, c.user.Username)
 		c.send(outboundMessage{Type: msgICE, Target: targetPublish, Candidate: wireCandidate(cand)})
 	})
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
@@ -205,6 +239,7 @@ func (c *Client) handlePublishOffer(sdp string) {
 		}
 	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		slog.Info("publish conn state", "user", c.user.Username, "state", state.String())
 		if !terminalState(state) {
 			return
 		}
@@ -232,15 +267,21 @@ func (c *Client) handlePublishOffer(sdp string) {
 
 	c.closePublishPCLocked()
 	c.publishPC = pc
+	for _, init := range c.pendingPublishICE {
+		_ = pc.AddICECandidate(init)
+	}
+	c.pendingPublishICE = nil
 	c.send(outboundMessage{Type: msgAnswer, Target: targetPublish, SDP: answer.SDP})
 }
 
 func (c *Client) handlePublishICE(init webrtc.ICECandidateInit) {
 	c.pubMu.Lock()
 	defer c.pubMu.Unlock()
-	if c.publishPC != nil {
-		_ = c.publishPC.AddICECandidate(init)
+	if c.publishPC == nil {
+		c.pendingPublishICE = append(c.pendingPublishICE, init)
+		return
 	}
+	_ = c.publishPC.AddICECandidate(init)
 }
 
 func (c *Client) closePublishPC() {
@@ -308,14 +349,18 @@ func (c *Client) handle(m *inboundMessage) {
 		if m.Candidate == nil {
 			return
 		}
+		slog.Info("remote candidate", "user", c.user.Username, "target", m.Target, "candidate", m.Candidate.Candidate)
 		init := toICECandidateInit(m.Candidate)
 		if m.Target == targetReceive {
 			c.recv.mu.Lock()
 			pc := c.recv.pc
-			c.recv.mu.Unlock()
-			if pc != nil {
-				_ = pc.AddICECandidate(init)
+			if pc == nil || pc.RemoteDescription() == nil {
+				c.recv.pendingRemoteICE = append(c.recv.pendingRemoteICE, init)
+				c.recv.mu.Unlock()
+				return
 			}
+			c.recv.mu.Unlock()
+			_ = pc.AddICECandidate(init)
 		} else if m.Target == targetPublish {
 			c.handlePublishICE(init)
 		}

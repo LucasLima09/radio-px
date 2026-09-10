@@ -41,6 +41,12 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         _channels = const [];
         _error = e.message;
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _channels = const [];
+        _error = 'Falha de rede ou servidor inacessível: $e';
+      });
     }
   }
 

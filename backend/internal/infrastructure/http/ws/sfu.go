@@ -2,11 +2,29 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
+
+// logCandidate logs an ICE candidate for diagnostics. A nil candidate means
+// ICE gathering completed.
+func logCandidate(role string, c *webrtc.ICECandidate, user string) {
+	if c == nil {
+		slog.Info("gather complete", "role", role, "user", user)
+		return
+	}
+	slog.Info("candidate",
+		"role", role,
+		"user", user,
+		"type", c.Typ.String(),
+		"proto", c.Protocol.String(),
+		"addr", c.Address,
+		"port", c.Port,
+	)
+}
 
 func newPeerConnection(stunServers []string) (*webrtc.PeerConnection, error) {
 	iceServers := make([]webrtc.ICEServer, 0, len(stunServers))
