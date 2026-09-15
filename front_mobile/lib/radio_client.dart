@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'ws_channel.dart';
+
 import 'models.dart';
 
 enum RadioConnState { connecting, connected, disconnected }
@@ -29,6 +31,9 @@ class RadioClient {
   MediaStream? _mic;
   MediaStream? _remoteStream;
 
+  final List<WsIceCandidate> _pendingRecvCandidates = [];
+  bool _recvRemoteSet = false;
+
   String? myUserId;
 
   RadioConnState _state = RadioConnState.disconnected;
@@ -48,6 +53,7 @@ class RadioClient {
   VoidCallback? onBusy;
 
   bool _disposed = false;
+  bool _webNgrokHintShown = false;
   Future<void> _pending = Future.value();
 
   static Map<String, dynamic> get _iceConfig => {
@@ -71,7 +77,7 @@ class RadioClient {
         'token': token,
         'channel_id': channelId,
       });
-      _ws = WebSocketChannel.connect(uri);
+      _ws = await openWsChannel(uri, {'ngrok-skip-browser-warning': '1'});
       _sub = _ws!.stream.listen(
         _enqueue,
         onError: (_) => _onClosed(),
@@ -149,13 +155,23 @@ class RadioClient {
 
       case 'ice':
         if (msg.candidate == null || msg.candidate!.candidate.isEmpty) return;
-        final pc = msg.target == 'publish' ? _publishPc : _recvPc;
-        if (pc == null) return;
-        await pc.addCandidate(RTCIceCandidate(
-          msg.candidate!.candidate,
-          msg.candidate!.sdpMid,
-          msg.candidate!.sdpMLineIndex,
-        ));
+        if (msg.target == 'publish') {
+          final pc = _publishPc;
+          if (pc == null) return;
+          await pc.addCandidate(RTCIceCandidate(
+            msg.candidate!.candidate,
+            msg.candidate!.sdpMid,
+            msg.candidate!.sdpMLineIndex,
+          ));
+        } else if (!_recvRemoteSet) {
+          _pendingRecvCandidates.add(msg.candidate!);
+        } else {
+          await _recvPc!.addCandidate(RTCIceCandidate(
+            msg.candidate!.candidate,
+            msg.candidate!.sdpMid,
+            msg.candidate!.sdpMLineIndex,
+          ));
+        }
 
       case 'talk_start':
         activeTalkerId = msg.userId;
@@ -186,7 +202,11 @@ class RadioClient {
     if (_recvPc == null) {
       _recvPc = await createPeerConnection(_iceConfig);
       _recvPc!.onIceCandidate = (c) {
+        debugPrint('[RadioClient] recv local candidate: ${c.candidate}');
         _sendIce('receive', c);
+      };
+      _recvPc!.onIceGatheringState = (s) {
+        debugPrint('[RadioClient] recv gathering -> $s');
       };
       _recvPc!.onTrack = (event) async {
         debugPrint('[RadioClient] track recebido: ${event.track.kind}');
@@ -208,6 +228,20 @@ class RadioClient {
       };
     }
     await _recvPc!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+    _recvRemoteSet = true;
+    final pending = List<WsIceCandidate>.of(_pendingRecvCandidates);
+    _pendingRecvCandidates.clear();
+    if (pending.isNotEmpty) {
+      debugPrint('[RadioClient] aplicando ${pending.length} candidatos '
+          'pendentes do receive');
+    }
+    for (final c in pending) {
+      await _recvPc!.addCandidate(RTCIceCandidate(
+        c.candidate,
+        c.sdpMid,
+        c.sdpMLineIndex,
+      ));
+    }
     final answer = await _recvPc!.createAnswer();
     await _recvPc!.setLocalDescription(answer);
     _send({'type': 'answer', 'target': 'receive', 'sdp': answer.sdp});
@@ -225,6 +259,7 @@ class RadioClient {
           .getUserMedia({'audio': true, 'video': false});
       _publishPc = await createPeerConnection(_iceConfig);
       _publishPc!.onIceCandidate = (c) {
+        debugPrint('[RadioClient] publish local candidate: ${c.candidate}');
         _sendIce('publish', c);
       };
       _publishPc!.onConnectionState = (s) {
@@ -281,6 +316,14 @@ class RadioClient {
   Future<void> _onClosed() async {
     if (_disposed) return;
     _setState(RadioConnState.disconnected);
+    if (kIsWeb &&
+        baseUrl.contains('ngrok') &&
+        !_webNgrokHintShown) {
+      _webNgrokHintShown = true;
+      onNotice?.call(
+          'O plano free do ngrok bloqueia o WebSocket no navegador. '
+          'Use o APK no celular (distância) ou o endereço local (testes).');
+    }
     myUserId = null;
     members.clear();
     activeTalkerId = null;
@@ -290,6 +333,8 @@ class RadioClient {
       await _recvPc!.close();
       _recvPc = null;
     }
+    _recvRemoteSet = false;
+    _pendingRecvCandidates.clear();
     _notify();
   }
 
@@ -332,5 +377,7 @@ class RadioClient {
       await _recvPc!.close();
       _recvPc = null;
     }
+    _recvRemoteSet = false;
+    _pendingRecvCandidates.clear();
   }
 }

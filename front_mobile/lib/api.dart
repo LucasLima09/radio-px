@@ -113,6 +113,7 @@ class ApiClient {
 
   Map<String, String> _headers(bool authed) => {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': '1',
         if (authed && _accessToken != null) 'Authorization': 'Bearer $_accessToken',
       };
 
@@ -120,7 +121,12 @@ class ApiClient {
     if (res.statusCode >= 400) throw _errorFrom(res);
     final text = res.body.trim();
     if (text.isEmpty) return null;
-    return jsonDecode(text);
+    try {
+      return jsonDecode(text);
+    } catch (_) {
+      throw ApiException(
+          res.statusCode, 'Resposta inválida do servidor (não é JSON)');
+    }
   }
 
   ApiException _errorFrom(http.Response res) {
