@@ -45,6 +45,7 @@ class RadioClient {
   MediaStream? get remoteStream => _remoteStream;
 
   final List<Member> members = [];
+  final Map<String, MemberLocation> locations = {};
   bool transmitting = false;
   String? activeTalkerId;
 
@@ -119,6 +120,12 @@ class RadioClient {
         members
           ..clear()
           ..addAll(msg.members ?? const []);
+        locations
+          ..clear()
+          ..addAll({
+            for (final loc in msg.locations ?? const <MemberLocation>[])
+              loc.userId: loc,
+          });
         for (final m in members) {
           if (m.talking) {
             activeTalkerId = m.userId;
@@ -137,8 +144,20 @@ class RadioClient {
 
       case 'peer_left':
         members.removeWhere((m) => m.userId == msg.userId);
+        locations.remove(msg.userId);
         if (activeTalkerId == msg.userId) activeTalkerId = null;
         _notify();
+
+      case 'location_update':
+        if (msg.userId != null && msg.lat != null && msg.lng != null) {
+          locations[msg.userId!] = MemberLocation(
+            userId: msg.userId!,
+            username: msg.username ?? '',
+            lat: msg.lat!,
+            lng: msg.lng!,
+          );
+          _notify();
+        }
 
       case 'offer':
         if (msg.target == 'receive' && msg.sdp != null) {
@@ -326,6 +345,7 @@ class RadioClient {
     }
     myUserId = null;
     members.clear();
+    locations.clear();
     activeTalkerId = null;
     transmitting = false;
     await _cleanPublish();
@@ -336,6 +356,11 @@ class RadioClient {
     _recvRemoteSet = false;
     _pendingRecvCandidates.clear();
     _notify();
+  }
+
+  void sendLocation(double lat, double lng) {
+    if (_state != RadioConnState.connected) return;
+    _send({'type': 'location', 'lat': lat, 'lng': lng});
   }
 
   void _send(Map<String, dynamic> message) {

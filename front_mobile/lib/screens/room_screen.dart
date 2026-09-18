@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../api.dart';
+import '../location_tracker.dart';
 import '../models.dart';
 import '../radio_client.dart' as radio;
 
@@ -24,8 +27,13 @@ class RoomScreen extends StatefulWidget {
 class _RoomScreenState extends State<RoomScreen> {
   late final radio.RadioClient _radio;
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+  final MapController _mapController = MapController();
+  LocationTracker? _tracker;
   bool _rendererReady = false;
   bool _pttPressed = false;
+  bool _showMap = false;
+  bool _mapReady = false;
+  Set<String> _lastFitIds = {};
 
   @override
   void initState() {
@@ -45,7 +53,21 @@ class _RoomScreenState extends State<RoomScreen> {
       _syncAudio();
       setState(() {});
     });
+    _initLocation();
     _connect();
+  }
+
+  Future<void> _initLocation() async {
+    final tracker = LocationTracker()
+      ..onPosition = _onPosition
+      ..onError = _onNotice;
+    _tracker = tracker;
+    await tracker.start();
+    if (mounted) setState(() {});
+  }
+
+  void _onPosition(double lat, double lng) {
+    _radio.sendLocation(lat, lng);
   }
 
   Future<void> _connect() async {
@@ -55,6 +77,7 @@ class _RoomScreenState extends State<RoomScreen> {
       _onNotice(e.message);
     }
     await _radio.connect();
+    _tracker?.sendLast();
     if (mounted) setState(() {});
   }
 
@@ -68,6 +91,7 @@ class _RoomScreenState extends State<RoomScreen> {
     if (!mounted) return;
     _syncAudio();
     setState(() {});
+    _fitMapIfNeeded();
   }
 
   void _onNotice(String message) {
@@ -102,6 +126,7 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
+    _tracker?.stop();
     _radio.dispose();
     _remoteRenderer.dispose();
     super.dispose();
@@ -115,6 +140,11 @@ class _RoomScreenState extends State<RoomScreen> {
       appBar: AppBar(
         title: Text(widget.channel.name),
         actions: [
+          IconButton(
+            icon: Icon(_showMap ? Icons.group : Icons.map_outlined),
+            tooltip: _showMap ? 'Ver membros' : 'Ver mapa',
+            onPressed: () => setState(() => _showMap = !_showMap),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(
@@ -133,7 +163,7 @@ class _RoomScreenState extends State<RoomScreen> {
             _AudioStatusLine(client: _radio),
             if (_radio.activeTalkerId != null) _TalkerBanner(client: _radio),
             Expanded(
-              child: _membersList(),
+              child: _showMap ? _mapView() : _membersList(),
             ),
             _pttArea(state),
             const SizedBox(height: 28),
@@ -146,6 +176,104 @@ class _RoomScreenState extends State<RoomScreen> {
         ),
       ),
     );
+  }
+
+  Widget _mapView() {
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: const LatLng(-23.5505, -46.6333),
+            initialZoom: 13,
+            onMapReady: () {
+              _mapReady = true;
+              _fitMapIfNeeded();
+            },
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'br.com.radiopx',
+            ),
+            MarkerLayer(markers: _buildMarkers()),
+          ],
+        ),
+        if (_radio.locations.isEmpty)
+          Center(
+            child: Card(
+              color: Colors.black.withValues(alpha: 0.6),
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Aguardando posição dos participantes...'),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Marker> _buildMarkers() {
+    return _radio.locations.values.map((loc) {
+      final isMe = loc.userId == _radio.myUserId;
+      final label = loc.username.isEmpty ? '?' : loc.username[0].toUpperCase();
+      return Marker(
+        point: LatLng(loc.lat, loc.lng),
+        width: 96,
+        height: 72,
+        alignment: Alignment.topCenter,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: isMe ? Colors.blue.shade700 : Colors.redAccent,
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 16, color: Colors.white),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isMe ? 'Você' : loc.username,
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  void _fitMapIfNeeded() {
+    if (!_showMap || !_mapReady) return;
+    final ids = _radio.locations.keys.toSet();
+    if (ids.isEmpty || ids == _lastFitIds) return;
+    _lastFitIds = ids;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mapReady) return;
+      final locs = _radio.locations.values.toList();
+      if (locs.isEmpty) return;
+      final coords = locs.map((l) => LatLng(l.lat, l.lng)).toList();
+      try {
+        if (coords.length == 1) {
+          _mapController.move(coords.first, 16);
+        } else {
+          _mapController.fitCamera(CameraFit.coordinates(
+            coordinates: coords,
+            padding: const EdgeInsets.all(56),
+          ));
+        }
+      } catch (_) {}
+    });
   }
 
   Widget _membersList() {
