@@ -15,6 +15,8 @@ var (
 )
 
 type Channel struct {
+	Latitude  *float64
+	Longitude *float64
 	ID        uuid.UUID
 	OwnerID   uuid.UUID
 	Name      string
@@ -41,11 +43,12 @@ func New(ownerID uuid.UUID, name string, isPrivate bool) (*Channel, error) {
 }
 
 type Public struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	IsPrivate bool      `json:"isPrivate"`
-	OwnerID   uuid.UUID `json:"ownerId"`
-	Members   int       `json:"members"`
+	DistanceKm *float64  `json:"distanceKm,omitempty"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	IsPrivate  bool      `json:"isPrivate"`
+	OwnerID    uuid.UUID `json:"ownerId"`
+	Members    int       `json:"members"`
 }
 
 func (c *Channel) Public(memberCount int) Public {

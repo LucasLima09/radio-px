@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -18,8 +19,10 @@ func NewChannelHandler(service *channelapp.Service) *ChannelHandler {
 }
 
 type createChannelRequest struct {
-	Name      string `json:"name"`
-	IsPrivate bool   `json:"isPrivate"`
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	Name      string   `json:"name"`
+	IsPrivate bool     `json:"isPrivate"`
 }
 
 func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +38,8 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.service.Create(r.Context(), channelapp.CreateInput{
+		Latitude:  req.Latitude,
+		Longitude: req.Longitude,
 		OwnerID:   u.ID,
 		Name:      req.Name,
 		IsPrivate: req.IsPrivate,
@@ -48,7 +53,32 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.service.List(r.Context()))
+	in := channelapp.ListInput{RadiusKm: 50}
+	q := r.URL.Query()
+	for key, target := range map[string]**float64{"latitude": &in.Latitude, "longitude": &in.Longitude} {
+		if q.Has(key) {
+			value, err := strconv.ParseFloat(q.Get(key), 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid "+key)
+				return
+			}
+			*target = &value
+		}
+	}
+	if q.Has("radiusKm") {
+		value, err := strconv.ParseFloat(q.Get("radiusKm"), 64)
+		if err != nil || in.Latitude == nil || in.Longitude == nil {
+			writeError(w, http.StatusBadRequest, "radiusKm requires valid coordinates")
+			return
+		}
+		in.RadiusKm = value
+	}
+	channels, err := h.service.List(r.Context(), in)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, channels)
 }
 
 func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {

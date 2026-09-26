@@ -16,13 +16,13 @@ func NewChannelRepository(pool *pgxpool.Pool) *ChannelRepository {
 	return &ChannelRepository{pool: pool}
 }
 
-const channelColumns = "id, owner_id, name, is_private, created_at, updated_at"
+const channelColumns = "id, owner_id, name, is_private, created_at, updated_at, latitude, longitude"
 
 func (r *ChannelRepository) Create(ctx context.Context, c *domainchannel.Channel) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO channels (id, owner_id, name, is_private, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		c.ID, c.OwnerID, c.Name, c.IsPrivate, c.CreatedAt, c.UpdatedAt,
+		`INSERT INTO channels (id, owner_id, name, is_private, created_at, updated_at, latitude, longitude)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		c.ID, c.OwnerID, c.Name, c.IsPrivate, c.CreatedAt, c.UpdatedAt, c.Latitude, c.Longitude,
 	)
 	return err
 }
@@ -30,7 +30,7 @@ func (r *ChannelRepository) Create(ctx context.Context, c *domainchannel.Channel
 func (r *ChannelRepository) FindByID(ctx context.Context, id uuid.UUID) (*domainchannel.Channel, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+channelColumns+` FROM channels WHERE id = $1`, id)
 	var c domainchannel.Channel
-	if err := row.Scan(&c.ID, &c.OwnerID, &c.Name, &c.IsPrivate, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.OwnerID, &c.Name, &c.IsPrivate, &c.CreatedAt, &c.UpdatedAt, &c.Latitude, &c.Longitude); err != nil {
 		return nil, translateError(err)
 	}
 	return &c, nil
@@ -46,7 +46,7 @@ func (r *ChannelRepository) List(ctx context.Context) ([]*domainchannel.Channel,
 	var out []*domainchannel.Channel
 	for rows.Next() {
 		var c domainchannel.Channel
-		if err := rows.Scan(&c.ID, &c.OwnerID, &c.Name, &c.IsPrivate, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.OwnerID, &c.Name, &c.IsPrivate, &c.CreatedAt, &c.UpdatedAt, &c.Latitude, &c.Longitude); err != nil {
 			return nil, err
 		}
 		out = append(out, &c)

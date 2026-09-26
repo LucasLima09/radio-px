@@ -74,16 +74,17 @@ class ApiClient {
     throw ApiException(401, 'Sessão expirada');
   }
 
-  Future<List<Channel>> listChannels() async {
-    final data = await _authed('GET', '/api/v1/channels');
+  Future<List<Channel>> listChannels({double? latitude, double? longitude, double radiusKm = 50}) async {
+    final query = latitude == null || longitude == null ? '' : '?latitude=$latitude&longitude=$longitude&radiusKm=$radiusKm';
+    final data = await _authed('GET', '/api/v1/channels$query');
     return (data as List)
         .map((e) => Channel.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
-  Future<Channel> createChannel(String name) async {
+  Future<Channel> createChannel(String name, {double? latitude, double? longitude}) async {
     final data =
-        await _authed('POST', '/api/v1/channels', {'name': name, 'isPrivate': false});
+        await _authed('POST', '/api/v1/channels', {'name': name, 'isPrivate': false, if (latitude != null) 'latitude': latitude, if (longitude != null) 'longitude': longitude});
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 

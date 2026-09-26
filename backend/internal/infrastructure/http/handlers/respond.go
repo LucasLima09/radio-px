@@ -22,6 +22,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func writeDomainError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, domainchannel.ErrInvalidLocation) || errors.Is(err, domainchannel.ErrInvalidRadius):
+		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, user.ErrNotFound) || errors.Is(err, domainchannel.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, user.ErrInvalidUsername) ||
