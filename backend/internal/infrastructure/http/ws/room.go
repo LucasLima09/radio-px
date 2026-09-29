@@ -1,46 +1,55 @@
 package ws
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/pion/webrtc/v4"
 )
-
-var errTalkBusy = errors.New("channel is busy")
 
 type Room struct {
 	hub  *Hub
 	id   uuid.UUID
 	name string
 
-	mu      sync.RWMutex
-	clients map[*Client]struct{}
-
-	// talk state (a PX channel allows a single talker at a time)
-	talker        *Client
-	talkSource    *webrtc.TrackRemote
-	talkTracks    map[*Client][]*localTrack
-	forwardCancel context.CancelFunc
+	mu        sync.RWMutex
+	clients   map[*Client]struct{}
+	locations map[*Client]locationInfo
+	recording map[*Client]struct{}
 }
 
 func newRoom(hub *Hub, id uuid.UUID, name string) *Room {
 	return &Room{
-		hub:        hub,
-		id:         id,
-		name:       name,
-		clients:    make(map[*Client]struct{}),
-		talkTracks: make(map[*Client][]*localTrack),
+		hub:       hub,
+		id:        id,
+		name:      name,
+		clients:   make(map[*Client]struct{}),
+		locations: make(map[*Client]locationInfo),
+		recording: make(map[*Client]struct{}),
 	}
 }
 
 func (r *Room) add(c *Client) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.addLocked(c)
+}
+
+func (r *Room) addLocked(c *Client) {
 	r.clients[c] = struct{}{}
-	r.mu.Unlock()
+}
+
+// attachAndSnapshot adds the client to the room and, atomically, sends it every
+// pending clip it has not heard yet. Doing both under the same lock guarantees
+// arrival order and avoids clips being delivered twice (live and via snapshot).
+func (r *Room) attachAndSnapshot(c *Client, lastHeardSeq int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.hub.queueFor(r.id).snapshotSince(lastHeardSeq)
+	r.addLocked(c)
+	for _, clip := range snapshot {
+		c.sendClip(clip)
+	}
 }
 
 func (r *Room) members() []memberInfo {
@@ -48,21 +57,65 @@ func (r *Room) members() []memberInfo {
 	defer r.mu.RUnlock()
 	out := make([]memberInfo, 0, len(r.clients))
 	for c := range r.clients {
-		out = append(out, newMemberInfo(c.user, r.talker == c))
+		_, rec := r.recording[c]
+		out = append(out, newMemberInfo(c.user, rec))
 	}
 	return out
-}
-
-func (r *Room) activeTalker() *Client {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.talker
 }
 
 func (r *Room) broadcast(m outboundMessage) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	r.broadcastLocked(m)
+}
+
+// updateLocation stores the latest known position for a member and broadcasts
+// it to every client in the room.
+func (r *Room) updateLocation(c *Client, lat, lng float64) {
+	r.mu.Lock()
+	r.locations[c] = locationInfo{UserID: c.user.ID, Username: c.user.Username, Lat: lat, Lng: lng}
+	r.broadcastLocked(outboundMessage{Type: msgLocationUpdate, UserID: c.user.ID, Username: c.user.Username, Lat: lat, Lng: lng})
+	r.mu.Unlock()
+}
+
+// allLocations returns the last known position of every member that has
+// reported one. Used to build the joined snapshot for a new client.
+func (r *Room) allLocations() []locationInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]locationInfo, 0, len(r.locations))
+	for _, loc := range r.locations {
+		out = append(out, loc)
+	}
+	return out
+}
+
+// setRecording flips a member's recording state and notifies everyone.
+func (r *Room) setRecording(c *Client, recording bool) {
+	r.mu.Lock()
+	typ := msgRecordingStop
+	if recording {
+		r.recording[c] = struct{}{}
+		typ = msgRecordingStart
+	} else {
+		delete(r.recording, c)
+	}
+	r.broadcastLocked(outboundMessage{
+		Type:     typ,
+		UserID:   c.user.ID,
+		Username: c.user.Username,
+	})
+	r.mu.Unlock()
+}
+
+// broadcastClip delivers a clip (metadata + binary payload) to every member,
+// including its author.
+func (r *Room) broadcastClip(clip *Clip) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for c := range r.clients {
+		c.sendClip(clip)
+	}
 }
 
 // broadcastLocked requires r.mu to be held.
@@ -72,107 +125,8 @@ func (r *Room) broadcastLocked(m outboundMessage) {
 		return
 	}
 	for c := range r.clients {
-		select {
-		case c.sendCh <- data:
-		default:
-		}
+		c.pushFrame(outboundFrame{Kind: frameText, Data: data})
 	}
-}
-
-// startTalk registers c as the room talker and fans out its track to every
-// other member. Returns errTalkBusy when another member is already talking.
-func (r *Room) startTalk(c *Client, track *webrtc.TrackRemote) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.talker != nil && r.talker != c {
-		return errTalkBusy
-	}
-	r.talker = c
-	r.talkSource = track
-
-	for other := range r.clients {
-		if other == c {
-			continue
-		}
-		if r.addFanOutLocked(other, track) != nil {
-			other.renegotiateRecv()
-		}
-	}
-
-	r.forwardCancel = startForwarder(context.Background(), track, r.fanOutLocalsLocked)
-
-	r.broadcastLocked(outboundMessage{Type: msgTalkStart, UserID: c.user.ID, Username: c.user.Username})
-	return nil
-}
-
-// attachNewMember wires a member that joined while a talk is in progress.
-func (r *Room) attachNewMember(c *Client) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.talkSource == nil {
-		return
-	}
-	if r.addFanOutLocked(c, r.talkSource) != nil {
-		c.renegotiateRecv()
-	}
-}
-
-func (r *Room) addFanOutLocked(c *Client, track *webrtc.TrackRemote) *localTrack {
-	local, err := newFanOutTrack(track)
-	if err != nil {
-		return nil
-	}
-	sender, err := c.addFanOutTrack(local)
-	if err != nil {
-		return nil
-	}
-	lt := &localTrack{local: local, sender: sender}
-	r.talkTracks[c] = append(r.talkTracks[c], lt)
-	return lt
-}
-
-func (r *Room) fanOutLocalsLocked() []*webrtc.TrackLocalStaticRTP {
-	var out []*webrtc.TrackLocalStaticRTP
-	for _, tracks := range r.talkTracks {
-		for _, t := range tracks {
-			out = append(out, t.local)
-		}
-	}
-	return out
-}
-
-func (r *Room) stopTalk(c *Client) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stopTalkLocked(c)
-}
-
-// stopTalkLocked requires r.mu to be held.
-func (r *Room) stopTalkLocked(c *Client) {
-	if r.talker != c {
-		return
-	}
-	if r.forwardCancel != nil {
-		r.forwardCancel()
-		r.forwardCancel = nil
-	}
-
-	for cl, tracks := range r.talkTracks {
-		for _, t := range tracks {
-			_ = cl.removeFanOutTrack(t)
-		}
-		if len(tracks) > 0 {
-			cl.renegotiateRecv()
-		}
-	}
-
-	r.talkTracks = make(map[*Client][]*localTrack)
-	r.talkSource = nil
-	r.talker = nil
-
-	c.closePublishPC()
-	r.broadcastLocked(outboundMessage{Type: msgTalkStop, UserID: c.user.ID})
 }
 
 func (r *Room) remove(c *Client) {
@@ -182,12 +136,8 @@ func (r *Room) remove(c *Client) {
 		return
 	}
 	delete(r.clients, c)
-
-	if r.talker == c {
-		r.stopTalkLocked(c)
-	}
-
-	delete(r.talkTracks, c)
+	delete(r.locations, c)
+	delete(r.recording, c)
 	r.broadcastLocked(outboundMessage{Type: msgPeerLeft, UserID: c.user.ID})
 	empty := len(r.clients) == 0
 	r.mu.Unlock()

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/lucas/radio-px-backend/internal/application/channel"
+	"github.com/lucas/radio-px-backend/internal/domain/location"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/auth/jwt"
 )
@@ -18,6 +20,7 @@ type Handler struct {
 	tokenManager *jwt.Manager
 	users        user.Repository
 	channels     *channel.Service
+	locations    location.Repository
 }
 
 func NewHandler(
@@ -26,6 +29,7 @@ func NewHandler(
 	tokenManager *jwt.Manager,
 	users user.Repository,
 	channels *channel.Service,
+	locations location.Repository,
 ) *Handler {
 	return &Handler{
 		hub:          hub,
@@ -33,6 +37,7 @@ func NewHandler(
 		tokenManager: tokenManager,
 		users:        users,
 		channels:     channels,
+		locations:    locations,
 	}
 }
 
@@ -53,6 +58,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeHubError(w, http.StatusBadRequest, "invalid channel_id")
 		return
+	}
+
+	// How far the client already listened. Optional and untrusted: the queue
+	// falls back to sending everything when the value makes no sense.
+	lastHeardSeq, _ := strconv.ParseInt(r.URL.Query().Get("last_heard_seq"), 10, 64)
+	if lastHeardSeq < 0 {
+		lastHeardSeq = 0
 	}
 
 	u, err := h.users.FindByID(r.Context(), claims.UserID)
@@ -81,29 +93,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room := h.hub.getOrCreateRoom(channelID, ch.Name)
-	client := newClient(room, u, conn, h.hub.stunServers)
-	room.add(client)
+	client := newClient(room, u, conn, h.locations)
 
 	// Let the client know who is already here.
-	talker := room.activeTalker()
 	client.send(outboundMessage{
-		Type:    msgJoined,
-		Room:    &roomInfo{ID: room.id, Name: room.name},
-		Members: room.members(),
-		UserID:  client.user.ID,
+		Type:      msgJoined,
+		Room:      &roomInfo{ID: room.id, Name: room.name},
+		Members:   room.members(),
+		Locations: room.allLocations(),
+		UserID:    client.user.ID,
 	})
-	if talker != nil {
-		client.send(outboundMessage{Type: msgTalkStart, UserID: talker.user.ID, Username: talker.user.Username})
-	}
 
-	if err := client.setupReceivePC(); err != nil {
-		h.logger.Error("setup receive peer connection", "error", err)
-		client.close()
-		return
-	}
-
-	// Wire this member into an ongoing talk before announcing their presence.
-	room.attachNewMember(client)
+	// Attach the member and stream the audio they still owe themselves before
+	// announcing their presence, so they hear pending clips in order, before
+	// live ones.
+	room.attachAndSnapshot(client, lastHeardSeq)
 	room.broadcast(outboundMessage{Type: msgPeerJoin, UserID: client.user.ID, Username: client.user.Username})
 
 	go client.writePump()

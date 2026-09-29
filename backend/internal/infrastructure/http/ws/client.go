@@ -3,60 +3,64 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/lucas/radio-px-backend/internal/domain/location"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
-	"github.com/pion/webrtc/v4"
 )
 
-var errNoReceivePeer = errors.New("receive peer connection is not ready")
+// outboundFrame is a single frame queued for a client: either a text (JSON
+// signaling) message or a binary chunk of an audio clip payload.
+type outboundFrame struct {
+	Kind websocket.MessageType
+	Data []byte
+}
 
-// recvSignaling serializes server-initiated renegotiation of the receive peer
-// connection. Only one offer may be in flight at a time; requests received
-// while an answer is pending set the dirty flag so a follow-up offer is sent
-// as soon as the pending answer arrives.
-type recvSignaling struct {
-	pc              *webrtc.PeerConnection
-	mu              sync.Mutex
-	pendingOffer    bool
-	dirty           bool
-	offerSent       bool
-	pendingICE      []*ICECandidateMsg
-	pendingRemoteICE []webrtc.ICECandidateInit
+const (
+	frameText   = websocket.MessageText
+	frameBinary = websocket.MessageBinary
+)
+
+// clipPayloadChunk is the maximum binary frame size pushed to a client.
+const clipPayloadChunk = 32 << 10
+
+// pendingClip assembles an audio clip being uploaded by the client over a
+// stream of binary frames.
+type pendingClip struct {
+	id       string
+	mime     string
+	duration time.Duration
+	size     int64
+	data     []byte
 }
 
 type Client struct {
-	room        *Room
-	user        *user.User
-	stunServers []string
+	room      *Room
+	user      *user.User
+	locations location.Repository
 
-	sendCh chan []byte
+	sendCh chan outboundFrame
 	done   chan struct{}
 
 	conn *websocket.Conn
 
-	recv *recvSignaling
-
-	pubMu     sync.Mutex
-	publishPC *webrtc.PeerConnection
-	pendingPublishICE []webrtc.ICECandidateInit
+	pending *pendingClip
 
 	closeOnce sync.Once
 }
 
-func newClient(room *Room, u *user.User, conn *websocket.Conn, stunServers []string) *Client {
+func newClient(room *Room, u *user.User, conn *websocket.Conn, locations location.Repository) *Client {
 	return &Client{
-		room:        room,
-		user:        u,
-		stunServers: stunServers,
-		sendCh:      make(chan []byte, 128),
-		done:        make(chan struct{}),
-		conn:        conn,
-		recv:        &recvSignaling{},
+		room:      room,
+		user:      u,
+		locations: locations,
+		sendCh:    make(chan outboundFrame, 256),
+		done:      make(chan struct{}),
+		conn:      conn,
 	}
 }
 
@@ -65,241 +69,148 @@ func (c *Client) send(m outboundMessage) {
 	if err != nil {
 		return
 	}
-	select {
-	case c.sendCh <- data:
-	default:
-	}
+	c.pushFrame(outboundFrame{Kind: frameText, Data: data})
 }
 
 func (c *Client) sendError(message string) {
 	c.send(outboundMessage{Type: msgError, Message: message})
 }
 
-// setupReceivePC creates the persistent receive peer connection used to listen
-// to the channel feed and sends the initial offer to the client. An audio
-// transceiver is reserved up front so the offer carries a real media section
-// (ICE credentials live on media lines; a media-less offer is rejected by
-// clients).
-func (c *Client) setupReceivePC() error {
-	pc, err := newPeerConnection(c.stunServers)
-	if err != nil {
-		return err
-	}
-	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
-		Direction: webrtc.RTPTransceiverDirectionSendonly,
-	}); err != nil {
-		_ = pc.Close()
-		return err
-	}
-	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
-		c.recv.mu.Lock()
-		if !c.recv.offerSent {
-			c.recv.pendingICE = append(c.recv.pendingICE, wireCandidate(cand))
-			c.recv.mu.Unlock()
-			return
-		}
-		c.recv.mu.Unlock()
-		logCandidate("recv local", cand, c.user.Username)
-		c.send(outboundMessage{Type: msgICE, Target: targetReceive, Candidate: wireCandidate(cand)})
-	})
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		slog.Info("recv conn state", "user", c.user.Username, "state", state.String())
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-			c.close()
-		}
-	})
-
-	c.recv.mu.Lock()
-	if c.recv.pc != nil {
-		_ = c.recv.pc.Close()
-	}
-	c.recv.pc = pc
-	c.recv.pendingOffer = true
-	c.recv.offerSent = false
-	c.recv.pendingICE = nil
-	c.recv.pendingRemoteICE = nil
-	c.recv.mu.Unlock()
-
-	c.sendRecvOffer()
-	return nil
-}
-
-func (c *Client) sendRecvOffer() {
-	offer, err := c.recv.pc.CreateOffer(nil)
-	if err != nil {
-		c.sendError("failed to create receive offer")
-		return
-	}
-	if err := c.recv.pc.SetLocalDescription(offer); err != nil {
-		c.sendError("failed to set local description")
-		return
-	}
-	c.send(outboundMessage{Type: msgOffer, Target: targetReceive, SDP: offer.SDP})
-
-	c.recv.mu.Lock()
-	c.recv.offerSent = true
-	pending := c.recv.pendingICE
-	c.recv.pendingICE = nil
-	c.recv.mu.Unlock()
-	for _, cand := range pending {
-		c.send(outboundMessage{Type: msgICE, Target: targetReceive, Candidate: cand})
+// pushFrame enqueues a frame without blocking the read loop. A full queue
+// drops the frame (best effort under load).
+func (c *Client) pushFrame(f outboundFrame) {
+	select {
+	case c.sendCh <- f:
+	default:
 	}
 }
 
-func (c *Client) renegotiateRecv() {
-	c.recv.mu.Lock()
-	if c.recv.pendingOffer {
-		c.recv.dirty = true
-		c.recv.mu.Unlock()
-		return
-	}
-	c.recv.pendingOffer = true
-	pc := c.recv.pc
-	c.recv.mu.Unlock()
-
-	if pc == nil {
-		return
-	}
-	offer, err := pc.CreateOffer(nil)
+// sendClip publishes a clip to this client: the clip_new metadata message
+// followed by the binary payload. If the metadata cannot be queued nothing is
+// sent, so a payload never arrives without its header.
+func (c *Client) sendClip(clip *Clip) {
+	meta, err := json.Marshal(outboundMessage{Type: msgClipNew, Clip: ptr(clip.info())})
 	if err != nil {
 		return
 	}
-	if err := pc.SetLocalDescription(offer); err != nil {
+	c.pushFrame(outboundFrame{Kind: frameText, Data: meta})
+	data := clip.Data
+	for off := 0; off < len(data); off += clipPayloadChunk {
+		end := off + clipPayloadChunk
+		if end > len(data) {
+			end = len(data)
+		}
+		c.pushFrame(outboundFrame{Kind: frameBinary, Data: data[off:end]})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// handle processes a single inbound text message.
+func (c *Client) handle(m *inboundMessage) {
+	switch m.Type {
+	case msgClipStart:
+		c.handleClipStart(m)
+	case msgClipEnd:
+		c.handleClipEnd(m)
+	case msgRecordingStart:
+		c.room.setRecording(c, true)
+	case msgRecordingStop:
+		c.room.setRecording(c, false)
+	case msgLocation:
+		c.handleLocation(m.Lat, m.Lng)
+	case msgLeave:
+		c.close()
+	}
+}
+
+// handleClipPayload appends an inbound binary frame to the clip being uploaded.
+func (c *Client) handleClipPayload(data []byte) {
+	p := c.pending
+	if p == nil {
 		return
 	}
-	c.send(outboundMessage{Type: msgOffer, Target: targetReceive, SDP: offer.SDP})
-}
-
-func (c *Client) handleRecvAnswer(sdp string) {
-	c.recv.mu.Lock()
-	pc := c.recv.pc
-	c.recv.pendingOffer = false
-	dirty := c.recv.dirty
-	c.recv.dirty = false
-	c.recv.mu.Unlock()
-
-	if pc == nil {
+	if int64(len(p.data)+len(data)) > p.size {
+		c.sendError("clip payload larger than declared size")
+		c.pending = nil
 		return
 	}
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}); err != nil {
+	p.data = append(p.data, data...)
+}
+
+func (c *Client) handleClipStart(m *inboundMessage) {
+	maxBytes := c.room.hub.maxClipBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxClipBytes
+	}
+	if m.ClipID == "" || m.Size <= 0 || m.Size > maxBytes {
+		c.sendError("invalid clip metadata")
 		return
 	}
-	c.recv.mu.Lock()
-	pending := c.recv.pendingRemoteICE
-	c.recv.pendingRemoteICE = nil
-	c.recv.mu.Unlock()
-	for _, init := range pending {
-		_ = pc.AddICECandidate(init)
+	if m.DurationMS <= 0 || time.Duration(m.DurationMS)*time.Millisecond > maxClipDuration {
+		c.sendError("clip duration exceeds the limit")
+		return
 	}
-	if dirty {
-		c.renegotiateRecv()
+	c.pending = &pendingClip{
+		id:       m.ClipID,
+		mime:     m.MIME,
+		duration: time.Duration(m.DurationMS) * time.Millisecond,
+		size:     m.Size,
 	}
 }
 
-func (c *Client) addFanOutTrack(local *webrtc.TrackLocalStaticRTP) (*webrtc.RTPSender, error) {
-	c.recv.mu.Lock()
-	defer c.recv.mu.Unlock()
-	pc := c.recv.pc
-	if pc == nil {
-		return nil, errNoReceivePeer
+func (c *Client) handleClipEnd(m *inboundMessage) {
+	p := c.pending
+	if p == nil || p.id != m.ClipID {
+		c.sendError("no clip upload in progress")
+		return
 	}
-	return pc.AddTrack(local)
-}
-
-func (c *Client) removeFanOutTrack(t *localTrack) error {
-	c.recv.mu.Lock()
-	defer c.recv.mu.Unlock()
-	if c.recv.pc == nil || t.sender == nil {
-		return nil
+	c.pending = nil
+	if int64(len(p.data)) != p.size {
+		c.sendError("clip payload does not match declared size")
+		return
 	}
-	return c.recv.pc.RemoveTrack(t.sender)
-}
 
-// handlePublishOffer handles a client offer of a publish (PTT) peer connection.
-func (c *Client) handlePublishOffer(sdp string) {
-	c.pubMu.Lock()
-	defer c.pubMu.Unlock()
-
-	pc, err := newPeerConnection(c.stunServers)
+	id, err := uuid.Parse(p.id)
 	if err != nil {
-		c.sendError("failed to create publish peer connection")
-		return
+		id = uuid.New()
 	}
-	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
-		logCandidate("publish local", cand, c.user.Username)
-		c.send(outboundMessage{Type: msgICE, Target: targetPublish, Candidate: wireCandidate(cand)})
-	})
-	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		if err := c.room.startTalk(c, track); err != nil {
-			if errors.Is(err, errTalkBusy) {
-				c.send(outboundMessage{Type: msgTalkBusy})
-			}
-			c.closePublishPCLocked()
-			return
-		}
-	})
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		slog.Info("publish conn state", "user", c.user.Username, "state", state.String())
-		if !terminalState(state) {
-			return
-		}
-		c.pubMu.Lock()
-		active := c.publishPC == pc
-		c.pubMu.Unlock()
-		if active {
-			c.room.stopTalk(c)
-		}
-	})
+	clip := &Clip{
+		ID:       id,
+		UserID:   c.user.ID,
+		Username: c.user.Username,
+		MIME:     p.mime,
+		Duration: p.duration,
+		Data:     p.data,
+	}
+	q := c.room.hub.queueFor(c.room.id)
+	q.add(clip)
+	c.room.broadcastClip(clip)
+}
 
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}); err != nil {
-		_ = pc.Close()
+// handleLocation updates the member position in the room and persists it to
+// the database without blocking the WebSocket read loop.
+func (c *Client) handleLocation(lat, lng *float64) {
+	if lat == nil || lng == nil {
+		c.sendError("invalid location")
 		return
 	}
-	answer, err := pc.CreateAnswer(nil)
+	loc, err := location.New(c.user.ID, c.room.id, *lat, *lng)
 	if err != nil {
-		_ = pc.Close()
+		c.sendError("invalid location")
 		return
 	}
-	if err := pc.SetLocalDescription(answer); err != nil {
-		_ = pc.Close()
+	c.room.updateLocation(c, *lat, *lng)
+	if c.locations == nil {
 		return
 	}
-
-	c.closePublishPCLocked()
-	c.publishPC = pc
-	for _, init := range c.pendingPublishICE {
-		_ = pc.AddICECandidate(init)
-	}
-	c.pendingPublishICE = nil
-	c.send(outboundMessage{Type: msgAnswer, Target: targetPublish, SDP: answer.SDP})
-}
-
-func (c *Client) handlePublishICE(init webrtc.ICECandidateInit) {
-	c.pubMu.Lock()
-	defer c.pubMu.Unlock()
-	if c.publishPC == nil {
-		c.pendingPublishICE = append(c.pendingPublishICE, init)
-		return
-	}
-	_ = c.publishPC.AddICECandidate(init)
-}
-
-func (c *Client) closePublishPC() {
-	c.pubMu.Lock()
-	defer c.pubMu.Unlock()
-	c.closePublishPCLocked()
-}
-
-func (c *Client) closePublishPCLocked() {
-	if c.publishPC != nil {
-		_ = c.publishPC.Close()
-		c.publishPC = nil
-	}
-}
-
-func terminalState(state webrtc.PeerConnectionState) bool {
-	return state == webrtc.PeerConnectionStateFailed ||
-		state == webrtc.PeerConnectionStateClosed
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := c.locations.Save(ctx, loc); err != nil {
+			slog.Warn("persisting location", "user", c.user.Username, "error", err)
+		}
+	}()
 }
 
 // writePump serializes writes to the WebSocket connection.
@@ -308,9 +219,9 @@ func (c *Client) writePump() {
 		select {
 		case <-c.done:
 			return
-		case msg := <-c.sendCh:
+		case f := <-c.sendCh:
 			writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := c.conn.Write(writeCtx, websocket.MessageText, msg)
+			err := c.conn.Write(writeCtx, f.Kind, f.Data)
 			cancel()
 			if err != nil {
 				return
@@ -323,71 +234,29 @@ func (c *Client) close() {
 	c.closeOnce.Do(func() {
 		close(c.done)
 		c.room.remove(c)
-		c.recv.mu.Lock()
-		if c.recv.pc != nil {
-			_ = c.recv.pc.Close()
-			c.recv.pc = nil
-		}
-		c.recv.mu.Unlock()
-		c.closePublishPC()
 		_ = c.conn.Close(websocket.StatusNormalClosure, "bye")
 	})
-}
-
-// handle processes a single inbound signaling message.
-func (c *Client) handle(m *inboundMessage) {
-	switch m.Type {
-	case "answer":
-		if m.Target == targetReceive {
-			c.handleRecvAnswer(m.SDP)
-		}
-	case "offer":
-		if m.Target == targetPublish {
-			c.handlePublishOffer(m.SDP)
-		}
-	case "ice":
-		if m.Candidate == nil {
-			return
-		}
-		slog.Info("remote candidate", "user", c.user.Username, "target", m.Target, "candidate", m.Candidate.Candidate)
-		init := toICECandidateInit(m.Candidate)
-		if m.Target == targetReceive {
-			c.recv.mu.Lock()
-			pc := c.recv.pc
-			if pc == nil || pc.RemoteDescription() == nil {
-				c.recv.pendingRemoteICE = append(c.recv.pendingRemoteICE, init)
-				c.recv.mu.Unlock()
-				return
-			}
-			c.recv.mu.Unlock()
-			_ = pc.AddICECandidate(init)
-		} else if m.Target == targetPublish {
-			c.handlePublishICE(init)
-		}
-	case "talk_stop":
-		c.room.stopTalk(c)
-	case "leave":
-		c.close()
-	}
 }
 
 // readLoop reads inbound messages until the connection is closed.
 func (c *Client) readLoop() {
 	defer c.close()
-	c.conn.SetReadLimit(1 << 20)
+	c.conn.SetReadLimit(8 << 20)
 	for {
 		typ, data, err := c.conn.Read(context.Background())
 		if err != nil {
 			return
 		}
-		if typ != websocket.MessageText && typ != websocket.MessageBinary {
-			continue
+		switch typ {
+		case websocket.MessageBinary:
+			c.handleClipPayload(data)
+		case websocket.MessageText:
+			var m inboundMessage
+			if err := json.Unmarshal(data, &m); err != nil {
+				c.sendError("invalid message")
+				continue
+			}
+			c.handle(&m)
 		}
-		var m inboundMessage
-		if err := json.Unmarshal(data, &m); err != nil {
-			c.sendError("invalid message")
-			continue
-		}
-		c.handle(&m)
 	}
 }

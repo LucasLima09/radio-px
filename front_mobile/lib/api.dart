@@ -22,12 +22,14 @@ class ApiClient {
 
   String? _accessToken;
   String? _refreshToken;
+  int _accessTokenExpiresAt = 0;
 
   String? get accessToken => _accessToken;
 
   void setSession(AuthSession session) {
     _accessToken = session.accessToken;
     _refreshToken = session.refreshToken;
+    _accessTokenExpiresAt = session.expiresAt;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
@@ -60,6 +62,7 @@ class ApiClient {
     }
     if (res.statusCode != 200) {
       _accessToken = null;
+      _accessTokenExpiresAt = 0;
       return false;
     }
     final session = AuthSession.fromJson(_decode(res));
@@ -68,10 +71,26 @@ class ApiClient {
     return true;
   }
 
+  /// Margem para não abrir o WebSocket com um token que expira no meio do
+  /// handshake.
+  static const _tokenExpiryMargin = Duration(seconds: 30);
+
+  /// Devolve um token de acesso válido, renovando quando necessário.
+  ///
+  /// A renovação é decidida por tempo de vida, e não por resposta 401, porque o
+  /// WebSocket não tem como reagir a um 401 no handshake: sem isso, uma
+  /// reconexão automática depois de o token expirar repetiria indefinidamente o
+  /// mesmo token recusado.
   Future<String> ensureAccessToken() async {
-    if (_accessToken != null) return _accessToken!;
+    if (_accessToken != null && !_isExpired()) return _accessToken!;
     if (await refresh()) return _accessToken!;
     throw ApiException(401, 'Sessão expirada');
+  }
+
+  bool _isExpired() {
+    if (_accessTokenExpiresAt <= 0) return false;
+    return _accessTokenExpiresAt - _tokenExpiryMargin.inSeconds <=
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
   }
 
   Future<List<Channel>> listChannels() async {
