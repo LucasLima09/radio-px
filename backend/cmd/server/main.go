@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	authapp "github.com/lucas/radio-px-backend/internal/application/auth"
@@ -44,15 +43,15 @@ func main() {
 	userRepo := postgres.NewUserRepository(pool)
 	channelRepo := postgres.NewChannelRepository(pool)
 	refreshRepo := postgres.NewRefreshTokenRepository(pool)
+	locationRepo := postgres.NewLocationRepository(pool)
 
 	tokenManager := appjwt.New(cfg.JWTSecret, "radio-px", cfg.AccessTokenTTLValue())
 
 	authService := authapp.NewService(userRepo, refreshRepo, tokenManager, cfg.RefreshTokenTTLValue())
 	channelService := channelapp.NewService(channelRepo, userRepo)
 
-	stunServers := stunList(os.Getenv("STUN_SERVERS"))
-	hub := ws.NewHub(logger, stunServers)
-	wsHandler := ws.NewHandler(hub, logger, tokenManager, userRepo, channelService)
+	hub := ws.NewHub(logger, cfg.ClipTTL, cfg.ClipMax, cfg.ClipMaxBytes)
+	wsHandler := ws.NewHandler(hub, logger, tokenManager, userRepo, channelService, locationRepo)
 
 	router := apphttp.NewRouter(apphttp.Dependencies{
 		Logger:       logger,
@@ -74,18 +73,4 @@ func main() {
 		logger.Error("http server", "error", err)
 		os.Exit(1)
 	}
-}
-
-func stunList(raw string) []string {
-	if raw == "" {
-		return []string{"stun:stun.l.google.com:19302"}
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

@@ -14,6 +14,11 @@ type Config struct {
 	JWTSecret       string        `env:"JWT_SECRET"`
 	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL" envDefault:"15m"`
 	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"168h"`
+
+	// Clip queue cache (in-memory, no persistence).
+	ClipTTL      time.Duration `env:"CLIP_TTL" envDefault:"20m"`
+	ClipMax      int           `env:"CLIP_MAX" envDefault:"200"`
+	ClipMaxBytes int64         `env:"CLIP_MAX_BYTES" envDefault:"5242880"`
 }
 
 func Load() (*Config, error) {
@@ -26,6 +31,15 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.JWTSecret) < 16 {
 		return nil, fmt.Errorf("JWT_SECRET must have at least 16 characters")
+	}
+	if cfg.ClipTTL <= 0 {
+		cfg.ClipTTL = 20 * time.Minute
+	}
+	if cfg.ClipMax <= 0 {
+		cfg.ClipMax = 200
+	}
+	if cfg.ClipMaxBytes <= 0 {
+		cfg.ClipMaxBytes = 5 << 20
 	}
 	return cfg, nil
 }

@@ -6,6 +6,8 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Precisamos da sua localização para mostrar você e os outros membros do canal no mapa.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Precisamos do microfone para gravar áudios no canal.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
