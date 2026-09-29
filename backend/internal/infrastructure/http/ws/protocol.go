@@ -31,6 +31,10 @@ const (
 // maxClipDuration is the maximum length allowed for a single audio clip.
 const maxClipDuration = 60 * time.Second
 
+// defaultMaxClipBytes is the per-clip upload limit used when the hub carries no
+// positive CLIP_MAX_BYTES configuration.
+const defaultMaxClipBytes = 5 << 20
+
 // inboundMessage is a message sent by the client over the WebSocket.
 type inboundMessage struct {
 	Type       string   `json:"type"`

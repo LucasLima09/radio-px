@@ -39,14 +39,13 @@ func (r *Room) addLocked(c *Client) {
 	r.clients[c] = struct{}{}
 }
 
-// attachAndSnapshot adds the client to the room and, atomically, sends it a
-// snapshot of the pending audio queue. Doing both under the same lock
-// guarantees arrival order and avoids clips being delivered twice (live and
-// via snapshot).
-func (r *Room) attachAndSnapshot(c *Client) {
+// attachAndSnapshot adds the client to the room and, atomically, sends it every
+// pending clip it has not heard yet. Doing both under the same lock guarantees
+// arrival order and avoids clips being delivered twice (live and via snapshot).
+func (r *Room) attachAndSnapshot(c *Client, lastHeardSeq int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	snapshot := r.hub.queueFor(r.id).snapshot()
+	snapshot := r.hub.queueFor(r.id).snapshotSince(lastHeardSeq)
 	r.addLocked(c)
 	for _, clip := range snapshot {
 		c.sendClip(clip)

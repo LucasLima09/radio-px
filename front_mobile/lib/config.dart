@@ -44,4 +44,18 @@ class AppConfig {
     await prefs.setString(
         _recordModeKey, mode == RecordMode.tap ? 'tap' : 'hold');
   }
+
+  static String _lastHeardKey(String channelId) => 'last_heard_$channelId';
+
+  /// Último áudio que terminou de tocar neste canal, usado para não reenviar
+  /// o que o aparelho já ouviu ao reconectar.
+  static Future<int> loadLastHeardSeq(String channelId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_lastHeardKey(channelId)) ?? 0;
+  }
+
+  static Future<void> saveLastHeardSeq(String channelId, int seq) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_lastHeardKey(channelId), seq);
+  }
 }

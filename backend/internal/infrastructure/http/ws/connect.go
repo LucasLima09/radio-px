@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -59,6 +60,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// How far the client already listened. Optional and untrusted: the queue
+	// falls back to sending everything when the value makes no sense.
+	lastHeardSeq, _ := strconv.ParseInt(r.URL.Query().Get("last_heard_seq"), 10, 64)
+	if lastHeardSeq < 0 {
+		lastHeardSeq = 0
+	}
+
 	u, err := h.users.FindByID(r.Context(), claims.UserID)
 	if err != nil {
 		writeHubError(w, http.StatusUnauthorized, "user not found")
@@ -96,9 +104,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UserID:    client.user.ID,
 	})
 
-	// Attach the member and stream the pending audio queue before announcing
-	// their presence, so they hear queued clips in order, before live ones.
-	room.attachAndSnapshot(client)
+	// Attach the member and stream the audio they still owe themselves before
+	// announcing their presence, so they hear pending clips in order, before
+	// live ones.
+	room.attachAndSnapshot(client, lastHeardSeq)
 	room.broadcast(outboundMessage{Type: msgPeerJoin, UserID: client.user.ID, Username: client.user.Username})
 
 	go client.writePump()

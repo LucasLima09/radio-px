@@ -34,25 +34,31 @@ func (c *Clip) info() clipInfo {
 
 // ClipQueue is an in-memory FIFO cache of audio clips for a channel. Clips are
 // ordered by arrival (Seq) and expire after a TTL. No database is involved.
+//
+// maxBytes is a budget for the whole queue, not a per-clip limit: the oldest
+// clips are dropped until both the count and the total size fit.
 type ClipQueue struct {
-	mu           sync.Mutex
-	ttl          time.Duration
-	maxClips     int
-	maxClipBytes int64
-	seq          int64
-	clips        []*Clip
+	mu       sync.Mutex
+	ttl      time.Duration
+	maxClips int
+	maxBytes int64
+	seq      int64
+	bytes    int64
+	clips    []*Clip
 }
 
-func newClipQueue(ttl time.Duration, maxClips int, maxClipBytes int64) *ClipQueue {
+func newClipQueue(ttl time.Duration, maxClips int, maxBytes int64) *ClipQueue {
 	return &ClipQueue{
-		ttl:          ttl,
-		maxClips:     maxClips,
-		maxClipBytes: maxClipBytes,
+		ttl:      ttl,
+		maxClips: maxClips,
+		maxBytes: maxBytes,
 	}
 }
 
 // add appends a clip to the queue, assigning its sequence number (arrival
-// order) and trimming the queue when it exceeds maxClips.
+// order) and trimming the queue to its limits. The clip is returned even when
+// the limits drop it again: connected clients still receive it live, it simply
+// is not kept for later arrivals.
 func (q *ClipQueue) add(c *Clip) *Clip {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -61,19 +67,38 @@ func (q *ClipQueue) add(c *Clip) *Clip {
 	c.Received = time.Now()
 	q.purgeLocked(c.Received)
 	q.clips = append(q.clips, c)
-	if q.maxClips > 0 && len(q.clips) > q.maxClips {
-		q.clips = append([]*Clip(nil), q.clips[len(q.clips)-q.maxClips:]...)
-	}
+	q.bytes += int64(len(c.Data))
+	q.trimLocked()
 	return c
 }
 
-// snapshot returns a copy of the still-valid clips in arrival order.
-func (q *ClipQueue) snapshot() []*Clip {
+// snapshotSince returns a copy of the clips the recipient has not heard yet, in
+// arrival order.
+//
+// The cursor is supplied by the client and cannot be taken at face value: Seq
+// restarts at 1 whenever the hub recreates the queue after dropping an empty
+// one, so a cursor left over from a previous queue would hide every clip. A
+// cursor outside the range still held by this queue is therefore ignored and
+// the caller receives everything available, which is the same as never having
+// listened to anything.
+func (q *ClipQueue) snapshotSince(cursor int64) []*Clip {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.purgeLocked(time.Now())
-	out := make([]*Clip, len(q.clips))
-	copy(out, q.clips)
+	if len(q.clips) == 0 {
+		return nil
+	}
+	first := q.clips[0].Seq
+	last := q.clips[len(q.clips)-1].Seq
+	if cursor < first-1 || cursor > last {
+		cursor = first - 1
+	}
+	out := make([]*Clip, 0, len(q.clips))
+	for _, c := range q.clips {
+		if c.Seq > cursor {
+			out = append(out, c)
+		}
+	}
 	return out
 }
 
@@ -97,7 +122,31 @@ func (q *ClipQueue) purgeLocked(now time.Time) {
 			break
 		}
 	}
-	if i > 0 {
-		q.clips = append([]*Clip(nil), q.clips[i:]...)
+	q.dropLocked(i)
+}
+
+// trimLocked drops the oldest clips until the queue fits both limits. A zero or
+// negative limit disables its respective constraint.
+func (q *ClipQueue) trimLocked() {
+	for len(q.clips) > 0 {
+		overCount := q.maxClips > 0 && len(q.clips) > q.maxClips
+		overBytes := q.maxBytes > 0 && q.bytes > q.maxBytes
+		if !overCount && !overBytes {
+			return
+		}
+		// One at a time: the budget is only re-evaluated against q.bytes after
+		// this drop is accounted for.
+		q.dropLocked(1)
 	}
+}
+
+// dropLocked removes the first n clips and keeps bytes in sync. The vacated
+// slots are cleared so the clips become collectable: reslicing alone keeps them
+// referenced by the backing array, which would defeat the byte budget.
+func (q *ClipQueue) dropLocked(n int) {
+	for i := 0; i < n; i++ {
+		q.bytes -= int64(len(q.clips[i].Data))
+		q.clips[i] = nil
+	}
+	q.clips = q.clips[n:]
 }

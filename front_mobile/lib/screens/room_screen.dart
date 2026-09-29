@@ -159,7 +159,7 @@ class _RoomScreenState extends State<RoomScreen> {
             child: Center(
               child: _ConnectionChip(
                 state: state,
-                onTap: state == radio.RadioConnState.disconnected ? _connect : null,
+                onTap: state == radio.RadioConnState.connected ? null : _connect,
               ),
             ),
           ),

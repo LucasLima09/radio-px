@@ -7,7 +7,9 @@ import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'api.dart';
 import 'audio_bridge.dart';
+import 'config.dart';
 import 'models.dart';
 import 'ws_channel.dart';
 
@@ -34,6 +36,9 @@ class RadioClient {
 
   static const int _uploadChunk = 64 << 10;
   static const int _maxClipSeconds = 60;
+  static const Duration _reconnectBaseDelay = Duration(seconds: 1);
+  static const Duration _reconnectMaxDelay = Duration(seconds: 30);
+  static const double _reconnectJitter = 0.2;
 
   WebSocketChannel? _ws;
   StreamSubscription? _sub;
@@ -43,6 +48,14 @@ class RadioClient {
   final AudioPlayer _player = AudioPlayer();
 
   String? myUserId;
+
+  // Reconexão automática.
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _connecting = false;
+
+  // Último áudio que terminou de tocar, para não reenviar o que já foi ouvido.
+  int _lastHeardSeq = 0;
 
   RadioConnState _state = RadioConnState.disconnected;
   RadioConnState get state => _state;
@@ -78,20 +91,28 @@ class RadioClient {
   bool _disposed = false;
   Future<void> _pending = Future.value();
 
+  /// Abre a conexão com o canal. Chamadas concorrentes e reconexões
+  /// pendentes são ignoradas; o que já está conectado não é reaberto.
   Future<void> connect() async {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    if (_connecting || _state == RadioConnState.connected) return;
     _disposed = false;
     _setState(RadioConnState.connecting);
+    _connecting = true;
     _playerSub ??= _player.playerStateStream.listen((ps) {
       if (ps.processingState == ProcessingState.completed && _playing) {
-        _onPlaybackCompleted();
+        _onPlaybackCompleted(markedAsHeard: true);
       }
     });
     try {
       final token = await tokenProvider();
+      _lastHeardSeq = await AppConfig.loadLastHeardSeq(channelId);
       final wsBase = baseUrl.replaceFirst(RegExp(r'^http'), 'ws');
       final uri = Uri.parse('$wsBase/ws').replace(queryParameters: {
         'token': token,
         'channel_id': channelId,
+        'last_heard_seq': '$_lastHeardSeq',
       });
       _ws = await openWsChannel(uri, {
         'ngrok-skip-browser-warning': '1',
@@ -101,17 +122,61 @@ class RadioClient {
         onError: (_) => _onClosed(),
         onDone: _onClosed,
       );
+    } on ApiException catch (e) {
+      // Nenhuma nova tentativa resolve uma sessão encerrada: insistir só gasta
+      // requisição a cada 30s. O usuário precisa entrar de novo.
+      if (e.statusCode == 401) {
+        await _onAuthFailure(e);
+      } else {
+        _onClosed();
+      }
     } catch (_) {
       _onClosed();
+    } finally {
+      _connecting = false;
     }
     _notify();
   }
 
-  Future<void> reconnect() async {
-    await _sub?.cancel();
-    _sub = null;
-    _ws = null;
-    await connect();
+  /// Encerra a sessão sem agendar reconexão, usado quando o token é recusado
+  /// porque a sessão acabou.
+  Future<void> _onAuthFailure(ApiException e) async {
+    if (_disposed) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _setState(RadioConnState.disconnected);
+    myUserId = null;
+    members.clear();
+    locations.clear();
+    await _stopRecording();
+    await _clearPlayback();
+    onNotice?.call(e.message);
+    _notify();
+  }
+
+  /// Agenda uma nova tentativa de conexão com espera exponencial e jitter, para
+  /// que vários aparelhos não voltem juntos depois de o servidor cair.
+  void _scheduleReconnect() {
+    if (_disposed) return;
+    _reconnectTimer?.cancel();
+    final delay = _reconnectDelay(_reconnectAttempt);
+    _reconnectAttempt++;
+    // `connecting` durante a espera evita oferecer um "Reconectar" para algo
+    // que já está reconectando sozinho.
+    _setState(RadioConnState.connecting);
+    _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
+      if (_disposed) return;
+      connect();
+    });
+    _notify();
+  }
+
+  Duration _reconnectDelay(int attempt) {
+    final scaled = _reconnectBaseDelay.inMilliseconds * pow(2, attempt);
+    final capped = min(scaled.toDouble(), _reconnectMaxDelay.inMilliseconds.toDouble());
+    final jitter = capped * _reconnectJitter * (Random().nextDouble() * 2 - 1);
+    return Duration(milliseconds: (capped + jitter).round());
   }
 
   void _enqueue(dynamic data) {
@@ -141,6 +206,7 @@ class RadioClient {
     switch (msg.type) {
       case 'joined':
         _setState(RadioConnState.connected);
+        _reconnectAttempt = 0;
         myUserId = msg.userId;
         members
           ..clear()
@@ -357,20 +423,31 @@ class RadioClient {
         .then((_) => _player.play())
         .catchError((Object e) {
       debugPrint('[RadioClient] falha ao reproduzir: $e');
-      _onPlaybackCompleted();
+      // Não conta como ouvido: o servidor reenviará este áudio na reconexão.
+      _onPlaybackCompleted(markedAsHeard: false);
     });
   }
 
-  void _onPlaybackCompleted() {
+  /// [markedAsHeard] só é verdadeiro quando o player chegou ao fim do áudio.
+  /// Falhas de reprodução não avançam o cursor, senão um áudio que nem tocou
+  /// seria silenciado para sempre.
+  void _onPlaybackCompleted({required bool markedAsHeard}) {
     if (!_playing) return;
     final done = _current;
     _current = null;
     _playing = false;
     if (done != null) {
       done.source.dispose();
+      if (markedAsHeard) _markHeard(done.meta);
     }
     _notify();
     _playNext();
+  }
+
+  void _markHeard(AudioClip meta) {
+    if (meta.seq <= _lastHeardSeq) return;
+    _lastHeardSeq = meta.seq;
+    unawaited(AppConfig.saveLastHeardSeq(channelId, meta.seq));
   }
 
   // ---------------- Limpeza ----------------
@@ -405,7 +482,10 @@ class RadioClient {
   }
 
   Future<void> _onClosed() async {
-    if (_disposed) return;
+    // onError e onDone disparam em sequência; sem esta guarda a queda geraria
+    // duas reconexões. A primeira falha ainda passa, porque connect() já marcou
+    // o estado como connecting.
+    if (_disposed || _state == RadioConnState.disconnected) return;
     _setState(RadioConnState.disconnected);
     if (kIsWeb &&
         baseUrl.contains('ngrok') &&
@@ -418,9 +498,12 @@ class RadioClient {
     myUserId = null;
     members.clear();
     locations.clear();
+    // Os áudios que ainda não tocaram são descartados aqui de propósito: o
+    // cursor faz o servidor reenviá-los, que é a única fonte da verdade.
     await _stopRecording();
     await _clearPlayback();
     _notify();
+    _scheduleReconnect();
   }
 
   // ---------------- Envio ----------------
@@ -464,6 +547,8 @@ class RadioClient {
 
   Future<void> dispose() async {
     _disposed = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     try {
       _ws?.sink.close();
     } catch (_) {}

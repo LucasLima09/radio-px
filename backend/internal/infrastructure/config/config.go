@@ -16,9 +16,10 @@ type Config struct {
 	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"168h"`
 
 	// Clip queue cache (in-memory, no persistence).
-	ClipTTL      time.Duration `env:"CLIP_TTL" envDefault:"20m"`
-	ClipMax      int           `env:"CLIP_MAX" envDefault:"200"`
-	ClipMaxBytes int64         `env:"CLIP_MAX_BYTES" envDefault:"5242880"`
+	ClipTTL           time.Duration `env:"CLIP_TTL" envDefault:"20m"`
+	ClipMax           int           `env:"CLIP_MAX" envDefault:"200"`
+	ClipMaxBytes      int64         `env:"CLIP_MAX_BYTES" envDefault:"5242880"`
+	ClipMaxQueueBytes int64         `env:"CLIP_MAX_QUEUE_BYTES" envDefault:"67108864"`
 }
 
 func Load() (*Config, error) {
@@ -40,6 +41,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.ClipMaxBytes <= 0 {
 		cfg.ClipMaxBytes = 5 << 20
+	}
+	if cfg.ClipMaxQueueBytes <= 0 {
+		cfg.ClipMaxQueueBytes = 64 << 20
 	}
 	return cfg, nil
 }

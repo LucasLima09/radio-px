@@ -50,7 +50,7 @@ func main() {
 	authService := authapp.NewService(userRepo, refreshRepo, tokenManager, cfg.RefreshTokenTTLValue())
 	channelService := channelapp.NewService(channelRepo, userRepo)
 
-	hub := ws.NewHub(logger, cfg.ClipTTL, cfg.ClipMax, cfg.ClipMaxBytes)
+	hub := ws.NewHub(logger, cfg.ClipTTL, cfg.ClipMax, cfg.ClipMaxBytes, cfg.ClipMaxQueueBytes)
 	wsHandler := ws.NewHandler(hub, logger, tokenManager, userRepo, channelService, locationRepo)
 
 	router := apphttp.NewRouter(apphttp.Dependencies{

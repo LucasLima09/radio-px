@@ -28,8 +28,6 @@ const (
 // clipPayloadChunk is the maximum binary frame size pushed to a client.
 const clipPayloadChunk = 32 << 10
 
-const maxUploadSize = 5 << 20 // 5 MiB per clip
-
 // pendingClip assembles an audio clip being uploaded by the client over a
 // stream of binary frames.
 type pendingClip struct {
@@ -141,7 +139,11 @@ func (c *Client) handleClipPayload(data []byte) {
 }
 
 func (c *Client) handleClipStart(m *inboundMessage) {
-	if m.ClipID == "" || m.Size <= 0 || m.Size > maxUploadSize {
+	maxBytes := c.room.hub.maxClipBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxClipBytes
+	}
+	if m.ClipID == "" || m.Size <= 0 || m.Size > maxBytes {
 		c.sendError("invalid clip metadata")
 		return
 	}

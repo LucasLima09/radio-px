@@ -9,10 +9,11 @@ import (
 )
 
 type Hub struct {
-	logger       *slog.Logger
-	clipTTL      time.Duration
-	maxClips     int
-	maxClipBytes int64
+	logger        *slog.Logger
+	clipTTL       time.Duration
+	maxClips      int
+	maxClipBytes  int64
+	maxQueueBytes int64
 
 	mu     sync.RWMutex
 	rooms  map[uuid.UUID]*Room
@@ -21,15 +22,17 @@ type Hub struct {
 	cleanupDone chan struct{}
 }
 
-func NewHub(logger *slog.Logger, clipTTL time.Duration, maxClips int, maxClipBytes int64) *Hub {
+func NewHub(logger *slog.Logger, clipTTL time.Duration, maxClips int, maxClipBytes, maxQueueBytes int64) *Hub {
 	h := &Hub{
-		logger:       logger,
-		clipTTL:      clipTTL,
-		maxClips:     maxClips,
-		maxClipBytes: maxClipBytes,
-		rooms:        make(map[uuid.UUID]*Room),
-		queues:       make(map[uuid.UUID]*ClipQueue),
-		cleanupDone:  make(chan struct{}),
+		logger:        logger,
+		clipTTL:       clipTTL,
+		maxClips:      maxClips,
+		maxClipBytes:  maxClipBytes,
+		maxQueueBytes: maxQueueBytes,
+
+		rooms:       make(map[uuid.UUID]*Room),
+		queues:      make(map[uuid.UUID]*ClipQueue),
+		cleanupDone: make(chan struct{}),
 	}
 	go h.cleanupLoop()
 	return h
@@ -69,7 +72,7 @@ func (h *Hub) queueFor(id uuid.UUID) *ClipQueue {
 	defer h.mu.Unlock()
 	q, ok := h.queues[id]
 	if !ok {
-		q = newClipQueue(h.clipTTL, h.maxClips, h.maxClipBytes)
+		q = newClipQueue(h.clipTTL, h.maxClips, h.maxQueueBytes)
 		h.queues[id] = q
 	}
 	return q
