@@ -25,6 +25,7 @@ const (
 type User struct {
 	ID           uuid.UUID
 	Username     string
+	Avatar       string
 	PasswordHash string
 	Role         string
 	CreatedAt    time.Time
@@ -53,14 +54,15 @@ func New(username, passwordHash string) (*User, error) {
 }
 
 type Public struct {
-	ID       uuid.UUID `json:"id"`
-	Username string    `json:"username"`
-	Role     string    `json:"role"`
+	ID        uuid.UUID `json:"id"`
+	Username  string    `json:"username"`
+	Avatar    string    `json:"avatar,omitempty"`
+	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
 func (u *User) Public() Public {
-	return Public{ID: u.ID, Username: u.Username, Role: u.Role, CreatedAt: u.CreatedAt}
+	return Public{ID: u.ID, Username: u.Username, Avatar: u.Avatar, Role: u.Role, CreatedAt: u.CreatedAt}
 }
 
 // ValidRole reporta se role é uma das roles aceitas.

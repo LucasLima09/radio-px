@@ -75,7 +75,7 @@ export class Api {
       headers: this.headers(),
       body: JSON.stringify({ username, password }),
     });
-    if (!res.ok) throw this.errorFrom(res);
+    if (!res.ok) throw await this.errorFrom(res);
     const session = (await res.json()) as AuthSession;
     this.applySession(session);
   }

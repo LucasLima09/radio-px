@@ -3,12 +3,14 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import { Api, ApiError, type LocationReport, type PublicUser } from './api';
+import { DemoApi } from './demo';
+import { isLiveLocation } from './location-status';
 
 const DEFAULT_SERVER = 'http://localhost:8080';
 const SERVER_KEY = 'radio_px_admin_server';
 const POLL_INTERVAL_MS = 5000;
 
-type Page = 'map' | 'users' | 'log';
+type Page = 'overview' | 'map' | 'users' | 'log';
 
 export default function App() {
   const [server, setServer] = useState(
@@ -18,7 +20,7 @@ export default function App() {
     () => new Api(localStorage.getItem(SERVER_KEY) ?? DEFAULT_SERVER),
   );
   const [loggedIn, setLoggedIn] = useState<boolean>(api.hasSession);
-  const [page, setPage] = useState<Page>('map');
+  const [page, setPage] = useState<Page>('overview');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -32,7 +34,7 @@ export default function App() {
       localStorage.setItem(SERVER_KEY, normalized);
       setServer(normalized);
       setApi(next);
-      setPage('map');
+      setPage('overview');
       setLoggedIn(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao entrar');
@@ -53,6 +55,7 @@ export default function App() {
       server={server}
       onServer={setServer}
       onLogin={handleLogin}
+      onDemo={() => { setApi(new DemoApi()); setPage('overview'); setError(null); setLoggedIn(true); }}
       busy={busy}
       error={error}
     />
@@ -71,12 +74,14 @@ function LoginView({
   server,
   onServer,
   onLogin,
+  onDemo,
   busy,
   error,
 }: {
   server: string;
   onServer: (v: string) => void;
   onLogin: (username: string, password: string) => void;
+  onDemo: () => void;
   busy: boolean;
   error: string | null;
 }) {
@@ -125,6 +130,8 @@ function LoginView({
         <button disabled={busy} onClick={submit}>
           {busy ? 'Entrando...' : 'Entrar'}
         </button>
+        <button className="demo-button" disabled={busy} onClick={onDemo}>Experimentar sem backend</button>
+        <p className="demo-hint">Explore o painel com dados de exemplo, sem servidor ou senha.</p>
       </div>
     </div>
   );
@@ -143,51 +150,71 @@ function Dashboard({
   onLogout: () => void;
   onUnauthorized: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const items: { id: Page; label: string; detail: string; icon: string }[] = [
+    { id: 'overview', label: 'Visão geral', detail: 'Resumo da operação', icon: '◫' },
+    { id: 'map', label: 'Mapa ao vivo', detail: 'Localização dos motoristas', icon: '◎' },
+    { id: 'users', label: 'Usuários', detail: 'Contas e permissões', icon: '♙' },
+    { id: 'log', label: 'Histórico de posições', detail: 'Registros e consultas', icon: '≡' },
+  ];
+  const selected = items.find((item) => item.id === page)!;
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <h1>Radio PX</h1>
-          <span>Painel admin</span>
-        </div>
-        <nav className="sidebar-nav">
-          <button
-            className={page === 'map' ? 'active' : ''}
-            onClick={() => onPage('map')}
-          >
-            Mapa
-          </button>
-          <button
-            className={page === 'users' ? 'active' : ''}
-            onClick={() => onPage('users')}
-          >
-            Usuários
-          </button>
-          <button
-            className={page === 'log' ? 'active' : ''}
-            onClick={() => onPage('log')}
-          >
-            Log de posições
-          </button>
+      {menuOpen && <button className="menu-overlay" aria-label="Fechar navegação" onClick={() => setMenuOpen(false)} />}
+      <aside className={`sidebar ${menuOpen ? 'is-open' : ''}`}>
+        <div className="sidebar-brand"><div className="brand-symbol">PX</div><div><h1>Radio PX</h1><span>Central de administração</span></div></div>
+        <div className="nav-caption">WORKSPACE</div>
+        <nav className="sidebar-nav" aria-label="Navegação principal">
+          {items.map((item) => <button key={item.id} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => { onPage(item.id); setMenuOpen(false); }}><span className="nav-icon" aria-hidden="true">{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><span className="nav-arrow" aria-hidden="true">›</span></button>)}
         </nav>
-        <div className="sidebar-footer">
-          <span className="who">{api.user?.username ?? 'admin'}</span>
-          <button onClick={onLogout}>Sair</button>
-        </div>
+        <div className="sidebar-note"><span className="status-dot" /> Monitoramento de posições<p>Acompanhe a operação e gerencie os acessos em um só lugar.</p></div>
+        <div className="sidebar-footer"><span className="avatar">{api.user?.username?.[0]?.toUpperCase() ?? 'A'}</span><div className="account"><strong>{api.user?.username ?? 'admin'}</strong><small>Administrador</small></div><button onClick={onLogout} aria-label="Sair da conta">Sair</button></div>
       </aside>
       <main className="main">
-        {page === 'map' && (
-          <MapPage api={api} onUnauthorized={onUnauthorized} />
-        )}
-        {page === 'users' && (
-          <UsersPage api={api} onUnauthorized={onUnauthorized} />
-        )}
-        {page === 'log' && (
-          <LogPage api={api} onUnauthorized={onUnauthorized} />
-        )}
+        {api instanceof DemoApi && <div className="demo-banner">Modo demonstração · Dados fictícios. Alterações valem apenas nesta sessão.</div>}
+        <header className="topbar"><button className="menu-toggle" aria-label="Abrir navegação" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>☰</button><span>Administração <span className="breadcrumb-divider">/</span> <strong>{selected.label}</strong></span><span className="workspace-badge">RADIO PX · ADMIN</span></header>
+        {page === 'overview' && <OverviewPage api={api} onUnauthorized={onUnauthorized} onPage={onPage} />}
+        {page === 'map' && <MapPage api={api} onUnauthorized={onUnauthorized} />}
+        {page === 'users' && <UsersPage api={api} onUnauthorized={onUnauthorized} />}
+        {page === 'log' && <LogPage api={api} onUnauthorized={onUnauthorized} />}
       </main>
     </div>
   );
+}
+
+function OverviewPage({ api, onUnauthorized, onPage }: { api: Api; onUnauthorized: () => void; onPage: (page: Page) => void }) {
+  const [data, setData] = useState<{ users: PublicUser[]; locations: LocationReport[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [updated, setUpdated] = useState<Date | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let pending = false;
+    const load = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const [users, locations] = await Promise.all([api.listUsers(), api.latestLocations()]);
+        if (!cancelled) { setData({ users, locations }); setUpdated(new Date()); setError(null); }
+      } catch (e) {
+        if (!cancelled) {
+          if (unauthorizedMessage(e)) onUnauthorized();
+          else setError(e instanceof Error ? e.message : 'Falha ao carregar o resumo');
+        }
+      } finally { pending = false; }
+    };
+    void load();
+    const timer = setInterval(load, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [api, onUnauthorized]);
+  return <div className="page overview-page">
+    <div className="overview-heading"><div><span className="eyebrow">CENTRAL DE OPERAÇÕES</span><h2>Visão geral</h2><p>Uma visão clara de quem está na estrada.</p></div><span className="update-label">{updated ? `Atualizado às ${updated.toLocaleTimeString('pt-BR')}` : 'Carregando indicadores…'}</span></div>
+    {error && <div className="login-error" role="alert">{error}</div>}
+    <div className="stats-grid">
+      {[['Usuários', data?.users.length], ['Localizações', data?.locations.length]].map(([label, value]) => <article className="stat-card" key={String(label)}><span>{label}</span><strong>{value ?? '—'}</strong></article>)}
+    </div>
+    <div className="overview-grid"><section className="overview-map panel"><div className="panel-heading"><div><h3>Na estrada</h3><p>Últimas posições reportadas</p></div><button className="ghost" onClick={() => onPage('map')}>Abrir mapa ↗</button></div><div className="map-container"><MapView reports={data?.locations ?? []} /></div></section>
+    </div>
+  </div>;
 }
 
 function unauthorizedMessage(e: unknown) {
@@ -249,6 +276,11 @@ function MapPage({
 }
 
 function MapView({ reports }: { reports: LocationReport[] }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
@@ -276,21 +308,24 @@ function MapView({ reports }: { reports: LocationReport[] }) {
       marker.remove();
     }
     markersRef.current = reports.map((r) => {
+      const live = isLiveLocation(r.reportedAt, now);
       const marker = L.marker([r.lat, r.lng], {
         icon: L.divIcon({
           className: 'beacon-marker',
-          html: `<div class="beacon-marker__pin">${
-            r.username ? r.username[0].toUpperCase() : '?'
-          }</div>`,
+          html: (() => { const pin = document.createElement('div'); pin.className = `beacon-marker__pin ${live ? 'is-live' : 'is-stale'}`; pin.textContent = r.username ? r.username[0].toUpperCase() : '?'; return pin; })(),
           iconSize: [32, 32],
           iconAnchor: [16, 16],
         }),
       });
-      marker.bindPopup(
-        `<b>${r.username}</b><br/>${r.lat.toFixed(5)}, ${r.lng.toFixed(
-          5,
-        )}<br/>${new Date(r.reportedAt).toLocaleString()}`,
-      );
+      const popup = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = r.username;
+      const status = document.createElement('div');
+      status.className = live ? 'location-live' : 'location-stale';
+      status.textContent = live ? 'Em tempo real' : 'Sem atualização recente';
+      popup.append(name, document.createElement('br'), document.createTextNode(`${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`), document.createElement('br'), document.createTextNode(new Date(r.reportedAt).toLocaleString('pt-BR')));
+      popup.append(status);
+      marker.bindPopup(popup);
       marker.addTo(map);
       return marker;
     });
@@ -307,9 +342,9 @@ function MapView({ reports }: { reports: LocationReport[] }) {
         );
       }
     }
-  }, [reports]);
+  }, [reports, now]);
 
-  return <div className="leaflet-container" ref={elRef} />;
+  return <><div className="leaflet-container" ref={elRef} /><div className="map-legend" aria-label="Status da localização"><span><i className="legend-live" />Em tempo real</span><span><i className="legend-stale" />Sem atualização recente</span><small>Tempo real: posição recebida há até 1 minuto</small></div></>;
 }
 
 function UsersPage({
@@ -348,7 +383,7 @@ function UsersPage({
   }, [load]);
 
   const setDraft = (u: PublicUser, patch: Partial<PublicUser>) => {
-    setDrafts((prev) => ({ ...prev, [u.id]: { ...prev[u.id], ...patch } }));
+    setDrafts((prev) => ({ ...prev, [u.id]: { ...u, ...prev[u.id], ...patch } }));
   };
   const resetDraft = (u: PublicUser) => {
     setDrafts((prev) => {

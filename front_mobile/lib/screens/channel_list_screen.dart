@@ -4,8 +4,10 @@ import '../api.dart';
 import '../background/beacon_controller.dart';
 import '../models.dart';
 import '../session_store.dart';
+import '../widgets/profile_avatar.dart';
 import 'login_screen.dart';
 import 'room_screen.dart';
+import 'profile_screen.dart';
 
 class ChannelListScreen extends StatefulWidget {
   const ChannelListScreen({super.key, required this.api, required this.user});
@@ -21,10 +23,13 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   List<Channel>? _channels;
   String? _error;
   bool _creating = false;
+  int _tab = 0;
+  late PublicUser _user;
 
   @override
   void initState() {
     super.initState();
+    _user = widget.user;
     _load();
   }
 
@@ -67,6 +72,16 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           ),
         ),
         actions: [
+          if (_tab == 0)
+            IconButton(
+              tooltip: 'Meu perfil',
+              onPressed: () => setState(() => _tab = 1),
+              icon: ProfileAvatar(
+                name: _user.username,
+                avatar: _user.avatar,
+                radius: 16,
+              ),
+            ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cancelar'),
@@ -93,8 +108,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _creating = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -102,11 +118,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => RoomScreen(
-          api: widget.api,
-          channel: channel,
-          myUser: widget.user,
-        ),
+        builder: (_) =>
+            RoomScreen(api: widget.api, channel: channel, myUser: _user),
       ),
     );
   }
@@ -126,7 +139,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final channels = _channels;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Canais'),
+        title: Text(_tab == 0 ? 'Canais' : 'Meu perfil'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -135,21 +148,45 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _createChannel,
-        icon: const Icon(Icons.add),
-        label: Text(_creating ? 'Criando...' : 'Novo canal'),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (tab) => setState(() => _tab = tab),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.radio_outlined),
+            selectedIcon: Icon(Icons.radio),
+            label: 'Canais',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Perfil',
+          ),
+        ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: channels == null
-            ? const Center(child: CircularProgressIndicator())
-            : channels.isEmpty
+      floatingActionButton: _tab != 0
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _createChannel,
+              icon: const Icon(Icons.add),
+              label: Text(_creating ? 'Criando...' : 'Novo canal'),
+            ),
+      body: IndexedStack(
+        index: _tab,
+        children: [
+          RefreshIndicator(
+            onRefresh: _load,
+            child: channels == null
+                ? const Center(child: CircularProgressIndicator())
+                : channels.isEmpty
                 ? ListView(
                     children: [
                       const SizedBox(height: 120),
-                      Icon(Icons.radio_outlined,
-                          size: 64, color: Colors.white24),
+                      Icon(
+                        Icons.radio_outlined,
+                        size: 64,
+                        color: Colors.white24,
+                      ),
                       const SizedBox(height: 12),
                       Text(
                         _error ?? 'Nenhum canal ainda',
@@ -157,7 +194,10 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                         style: const TextStyle(color: Colors.white54),
                       ),
                       if (_error != null)
-                        TextButton(onPressed: _load, child: const Text('Tentar novamente')),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('Tentar novamente'),
+                        ),
                     ],
                   )
                 : ListView.builder(
@@ -170,14 +210,21 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                           child: Icon(Icons.wifi_tethering),
                         ),
                         title: Text(ch.name),
-                        subtitle: Text(
-                          '${ch.members} membro(s)',
-                        ),
+                        subtitle: Text('${ch.members} membro(s)'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _openChannel(ch),
                       );
                     },
                   ),
+          ),
+          ProfileScreen(
+            api: widget.api,
+            user: _user,
+            onSaved: (user) {
+              if (mounted) setState(() => _user = user);
+            },
+          ),
+        ],
       ),
     );
   }

@@ -19,11 +19,11 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-const userColumns = "id, username, password_hash, role, created_at, updated_at"
+const userColumns = "id, username, password_hash, role, created_at, updated_at, avatar"
 
 func scanUser(row pgx.Row) (*user.User, error) {
 	var u user.User
-	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.Avatar); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -82,8 +82,8 @@ func (r *UserRepository) List(ctx context.Context) ([]*user.User, error) {
 
 func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 	_, err := r.pool.Exec(ctx,
-		`UPDATE users SET username = $1, role = $2, updated_at = $3 WHERE id = $4`,
-		u.Username, u.Role, u.UpdatedAt, u.ID)
+		`UPDATE users SET username = $1, role = $2, updated_at = $3, avatar = $5 WHERE id = $4`,
+		u.Username, u.Role, u.UpdatedAt, u.ID, u.Avatar)
 	if err != nil {
 		return translateError(err)
 	}

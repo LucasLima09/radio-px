@@ -45,6 +45,8 @@ func NewRouter(deps Dependencies) *chi.Mux {
 	usersHandler := handlers.NewUsersHandler(deps.Users)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/profile", usersHandler.Profile)
+		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Patch("/profile", usersHandler.UpdateProfile)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", authHandler.Register)
 			r.Post("/login", authHandler.Login)
