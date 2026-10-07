@@ -3,13 +3,11 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/lucas/radio-px-backend/internal/domain/location"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 )
 
@@ -39,9 +37,8 @@ type pendingClip struct {
 }
 
 type Client struct {
-	room      *Room
-	user      *user.User
-	locations location.Repository
+	room *Room
+	user *user.User
 
 	sendCh chan outboundFrame
 	done   chan struct{}
@@ -53,14 +50,13 @@ type Client struct {
 	closeOnce sync.Once
 }
 
-func newClient(room *Room, u *user.User, conn *websocket.Conn, locations location.Repository) *Client {
+func newClient(room *Room, u *user.User, conn *websocket.Conn) *Client {
 	return &Client{
-		room:      room,
-		user:      u,
-		locations: locations,
-		sendCh:    make(chan outboundFrame, 256),
-		done:      make(chan struct{}),
-		conn:      conn,
+		room:   room,
+		user:   u,
+		sendCh: make(chan outboundFrame, 256),
+		done:   make(chan struct{}),
+		conn:   conn,
 	}
 }
 
@@ -117,8 +113,6 @@ func (c *Client) handle(m *inboundMessage) {
 		c.room.setRecording(c, true)
 	case msgRecordingStop:
 		c.room.setRecording(c, false)
-	case msgLocation:
-		c.handleLocation(m.Lat, m.Lng)
 	case msgLeave:
 		c.close()
 	}
@@ -186,31 +180,6 @@ func (c *Client) handleClipEnd(m *inboundMessage) {
 	q := c.room.hub.queueFor(c.room.id)
 	q.add(clip)
 	c.room.broadcastClip(clip)
-}
-
-// handleLocation updates the member position in the room and persists it to
-// the database without blocking the WebSocket read loop.
-func (c *Client) handleLocation(lat, lng *float64) {
-	if lat == nil || lng == nil {
-		c.sendError("invalid location")
-		return
-	}
-	loc, err := location.New(c.user.ID, c.room.id, *lat, *lng)
-	if err != nil {
-		c.sendError("invalid location")
-		return
-	}
-	c.room.updateLocation(c, *lat, *lng)
-	if c.locations == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := c.locations.Save(ctx, loc); err != nil {
-			slog.Warn("persisting location", "user", c.user.Username, "error", err)
-		}
-	}()
 }
 
 // writePump serializes writes to the WebSocket connection.
