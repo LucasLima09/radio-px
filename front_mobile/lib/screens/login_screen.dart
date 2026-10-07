@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../background/beacon_controller.dart';
 import '../config.dart';
 import '../models.dart';
 import '../session_store.dart';
@@ -67,6 +69,14 @@ class _LoginScreenState extends State<LoginScreen> {
           ? (await SessionStore.load())!
           : await api.login(_userCtrl.text.trim(), _passCtrl.text);
       api.setSession(session);
+      final beaconOk = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? await BeaconController.start()
+          : true;
+      if (!beaconOk) {
+        _showError(
+            'Sem permissão de localização: o app não enviará sua posição em '
+            'segundo plano.');
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(

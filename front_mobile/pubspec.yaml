@@ -38,11 +38,11 @@ dependencies:
   http: ^1.6.0
   shared_preferences: ^2.5.5
   geolocator: ^14.0.2
-  flutter_map: ^8.2.2
-  latlong2: ^0.9.1
   record: ^6.1.0
   just_audio: ^0.9.42
   web: ^1.1.0
+  flutter_foreground_task: ^11.0.3
+  wakelock_plus: ^1.8.0
 
 dev_dependencies:
   flutter_test:

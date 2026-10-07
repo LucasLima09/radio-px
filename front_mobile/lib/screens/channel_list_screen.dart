@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../background/beacon_controller.dart';
 import '../models.dart';
 import '../session_store.dart';
 import 'login_screen.dart';
@@ -111,6 +112,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   }
 
   Future<void> _logout() async {
+    await BeaconController.stop();
     await SessionStore.clear();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
