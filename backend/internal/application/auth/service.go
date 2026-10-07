@@ -31,7 +31,7 @@ type Service struct {
 }
 
 type TokenSigner interface {
-	GenerateAccessToken(userID uuid.UUID, username string) (string, time.Time, error)
+	GenerateAccessToken(userID uuid.UUID, username, role string) (string, time.Time, error)
 	GenerateRefreshToken() (raw string, hash string, err error)
 	HashToken(value string) string
 }
@@ -131,7 +131,7 @@ func (s *Service) Logout(ctx context.Context, raw string) error {
 }
 
 func (s *Service) issueTokens(ctx context.Context, u *user.User) (*Tokens, error) {
-	access, expiresAt, err := s.sign.GenerateAccessToken(u.ID, u.Username)
+	access, expiresAt, err := s.sign.GenerateAccessToken(u.ID, u.Username, u.Role)
 	if err != nil {
 		return nil, err
 	}
