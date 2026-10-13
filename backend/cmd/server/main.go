@@ -60,6 +60,8 @@ func main() {
 		AuthService:  authService,
 		Channels:     channelService,
 		WSHandler:    wsHandler,
+		Admin:        postgres.NewAdminRepository(pool),
+		AdminUserIDs: cfg.AdminUserIDs,
 	})
 
 	server := &http.Server{

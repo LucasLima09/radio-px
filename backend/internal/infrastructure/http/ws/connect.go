@@ -1,10 +1,13 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -15,6 +18,7 @@ import (
 )
 
 type Handler struct {
+	channelGate  sync.RWMutex
 	hub          *Hub
 	logger       *slog.Logger
 	tokenManager *jwt.Manager
@@ -72,6 +76,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeHubError(w, http.StatusUnauthorized, "user not found")
 		return
 	}
+	// Keep membership checks and attachment atomic relative to admin deletion.
+	h.channelGate.RLock()
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			h.channelGate.RUnlock()
+		}
+	}()
 
 	isMember, err := h.channels.IsMember(r.Context(), channelID, u.ID)
 	if err != nil || !isMember {
@@ -109,9 +121,38 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// live ones.
 	room.attachAndSnapshot(client, lastHeardSeq)
 	room.broadcast(outboundMessage{Type: msgPeerJoin, UserID: client.user.ID, Username: client.user.Username})
+	gateHeld = false
+	h.channelGate.RUnlock()
 
 	go client.writePump()
 	client.readLoop()
+}
+
+var ErrChannelInUse = errors.New("channel is in use")
+
+// DeleteIdleChannel prevents deleting channels with active radio connections.
+func (h *Handler) DeleteIdleChannel(ctx context.Context, id uuid.UUID, remove func(context.Context, uuid.UUID) error) error {
+	h.channelGate.Lock()
+	defer h.channelGate.Unlock()
+	h.hub.mu.RLock()
+	room := h.hub.rooms[id]
+	h.hub.mu.RUnlock()
+	if room != nil {
+		room.mu.RLock()
+		active := len(room.clients) > 0
+		room.mu.RUnlock()
+		if active {
+			return ErrChannelInUse
+		}
+	}
+	if err := remove(ctx, id); err != nil {
+		return err
+	}
+	h.hub.mu.Lock()
+	delete(h.hub.rooms, id)
+	delete(h.hub.queues, id)
+	h.hub.mu.Unlock()
+	return nil
 }
 
 func writeHubError(w http.ResponseWriter, status int, message string) {

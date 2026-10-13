@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Radio PX · Administração</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <main id="login-view" class="login-view">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="wave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <p class="eyebrow">RADIO PX / ADMIN</p>
+      <h1 id="login-title">Tudo no<br>seu controle.</h1>
+      <p class="muted intro">Entre com sua conta de administrador.</p>
+      <form id="login-form">
+        <label for="username">Usuário</label>
+        <input id="username" name="username" autocomplete="username" required maxlength="50" placeholder="Seu usuário">
+        <label for="password">Senha</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Sua senha">
+        <p id="login-message" class="message" role="alert"></p>
+        <button id="login-submit" class="primary full" type="submit">Entrar no painel <span aria-hidden="true">↗</span></button>
+      </form>
+      <p class="login-footnote">Acesso restrito · Radio PX</p>
+    </section>
+  </main>
+
+  <div id="dashboard-view" class="dashboard" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="/admin" aria-label="Radio PX, início"><div class="wave-mark small" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><span>Radio PX<small>Administração</small></span></a>
+      <p class="nav-label">GERENCIAR</p>
+      <nav aria-label="Seções do painel">
+        <button class="nav-button active" data-tab="channels" aria-current="page"><span aria-hidden="true">#</span> Canais</button>
+        <button class="nav-button" data-tab="users"><span aria-hidden="true">◎</span> Usuários</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="account"><span class="avatar" id="user-initial" aria-hidden="true"></span><span><strong id="admin-name"></strong><small>Administrador</small></span></div><button id="logout" class="quiet">Sair da conta <span aria-hidden="true">↗</span></button></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar"><span>Painel de administração</span><button id="refresh" class="secondary">↻ Atualizar</button></header>
+      <div class="page-content">
+        <div class="page-heading"><p class="eyebrow">VISÃO GERAL</p><h1>Sua rede, em um lugar.</h1><p class="muted">O essencial para manter a conversa acontecendo.</p></div>
+        <section class="stats" aria-label="Resumo da rede">
+          <article class="stat"><span>Usuários cadastrados</span><strong id="stat-users">—</strong><small>Contas na plataforma</small></article>
+          <article class="stat"><span>Canais criados</span><strong id="stat-channels">—</strong><small>Espaços de conversa</small></article>
+          <article class="stat"><span>Participações</span><strong id="stat-memberships">—</strong><small>Vínculos entre usuários e canais</small></article>
+        </section>
+        <p id="dashboard-message" class="message" role="status" aria-live="polite"></p>
+        <section class="data-panel" aria-labelledby="section-title">
+          <div class="panel-heading"><div><h2 id="section-title">Canais</h2><p id="section-description" class="muted">Consulte os canais e remova os que não são mais necessários.</p></div><span id="result-count" class="count-badge">—</span></div>
+          <form id="search-form" class="search-form" role="search"><label class="sr-only" for="search">Buscar por nome</label><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Buscar canal por nome…" maxlength="100" autocomplete="off"><button class="secondary" type="submit">Buscar</button></form>
+          <div id="table-status" class="table-status" role="status" aria-live="polite"></div>
+          <div id="table-wrapper" class="table-wrapper"><table><caption id="table-caption" class="sr-only">Canais cadastrados</caption><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
+          <footer class="pagination"><span id="page-info" class="muted">—</span><div><button id="previous" class="secondary" disabled>← Anterior</button><button id="next" class="secondary" disabled>Próxima →</button></div></footer>
+        </section>
+        <p class="page-note">Os números representam registros cadastrados, não conexões ao vivo.</p>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <form id="delete-form">
+      <p class="eyebrow">GERENCIAR CANAL</p>
+      <h2 id="delete-title">Excluir canal?</h2>
+      <p class="muted">O canal <strong id="delete-name"></strong> e seus vínculos e localizações serão removidos permanentemente.</p>
+      <p class="dialog-note">Canais com participantes conectados não podem ser excluídos.</p>
+      <p id="delete-message" class="message" role="alert"></p>
+      <div class="dialog-actions"><button id="cancel-delete" type="button" class="secondary">Cancelar</button><button id="confirm-delete" type="submit" class="danger">Excluir canal</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

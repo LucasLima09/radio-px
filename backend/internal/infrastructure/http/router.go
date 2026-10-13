@@ -8,8 +8,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	authapp "github.com/lucas/radio-px-backend/internal/application/auth"
 	channelapp "github.com/lucas/radio-px-backend/internal/application/channel"
+	"github.com/lucas/radio-px-backend/internal/domain/admin"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/auth/jwt"
+	"github.com/lucas/radio-px-backend/internal/infrastructure/http/adminui"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/handlers"
 	httpmw "github.com/lucas/radio-px-backend/internal/infrastructure/http/middleware"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/ws"
@@ -22,6 +24,8 @@ type Dependencies struct {
 	AuthService  *authapp.Service
 	Channels     *channelapp.Service
 	WSHandler    *ws.Handler
+	Admin        admin.Repository
+	AdminUserIDs []string
 }
 
 func NewRouter(deps Dependencies) *chi.Mux {
@@ -39,8 +43,20 @@ func NewRouter(deps Dependencies) *chi.Mux {
 
 	authHandler := handlers.NewAuthHandler(deps.AuthService)
 	channelHandler := handlers.NewChannelHandler(deps.Channels)
+	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger)
+	r.Get("/admin", adminui.Serve)
+	r.Get("/admin/*", adminui.Serve)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(httpmw.Authenticate(deps.TokenManager, deps.Users))
+			r.Use(httpmw.RequireAdmin(deps.AdminUserIDs))
+			r.Get("/me", adminHandler.Me)
+			r.Get("/summary", adminHandler.Summary)
+			r.Get("/users", adminHandler.Users)
+			r.Get("/channels", adminHandler.Channels)
+			r.Delete("/channels/{channelID}", adminHandler.DeleteChannel)
+		})
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", authHandler.Register)
 			r.Post("/login", authHandler.Login)
