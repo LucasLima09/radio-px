@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../ui.dart';
 import '../config.dart';
 import '../models.dart';
 import '../session_store.dart';
@@ -110,36 +111,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.radio, size: 72),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Radio PX',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const Text(
-                    'Comunicação PTT',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white54),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: RadioMark(),
                   ),
                   const SizedBox(height: 32),
-                  TextField(
-                    controller: _serverCtrl,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: 'Servidor',
-                      hintText: 'http://10.0.2.2:8080',
-                      prefixIcon: Icon(Icons.dns_outlined),
-                      border: OutlineInputBorder(),
-                    ),
+                  const PageHeading(
+                    title: 'Sua voz.\nMais perto.',
+                    subtitle: 'Entre no Radio PX e conecte-se ao seu canal.',
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 36),
                   TextField(
                     controller: _userCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Usuário',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -149,40 +134,49 @@ class _LoginScreenState extends State<LoginScreen> {
                     onSubmitted: (_) => _login(),
                     decoration: const InputDecoration(
                       labelText: 'Senha',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton.icon(
+                  FilledButton(
                     onPressed: _loading ? null : _login,
-                    icon: _loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.login),
-                    label: const Text('Entrar'),
+                    child: Text(_loading ? 'Entrando...' : 'Entrar'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
+                  TextButton(
                     onPressed: _loading ? null : _openRegister,
-                    icon: const Icon(Icons.person_add_alt),
-                    label: const Text('Criar conta'),
-                    style: OutlinedButton.styleFrom(
+                    child: const Text('Criar conta'),
+                    style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(bottom: 12),
+                      title: const Text('Configurar servidor',
+                          style: TextStyle(color: pxMuted, fontSize: 13)),
+                      children: [
+                  TextField(
+                    controller: _serverCtrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'Servidor',
+                      hintText: 'http://10.0.2.2:8080',
+                    ),
+                  ),
+                      ],
                     ),
                   ),
                   if (_savedUser != null) ...[
                     const SizedBox(height: 16),
-                    TextButton.icon(
+                    TextButton(
                       onPressed: _loading ? null : () => _login(asSaved: true),
-                      icon: const Icon(Icons.play_arrow),
-                      label: Text('Continuar como ${_savedUser!.username}'),
+                      child: Text('Continuar como ${_savedUser!.username}'),
                     ),
                   ],
                 ],

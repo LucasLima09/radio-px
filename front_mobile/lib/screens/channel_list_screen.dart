@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../ui.dart';
 import '../models.dart';
 import '../session_store.dart';
 import 'login_screen.dart';
@@ -62,7 +63,6 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'Nome do canal',
-            border: OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -124,21 +124,34 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final channels = _channels;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Canais'),
+        title: const Row(children: [
+          RadioMark(size: 32),
+          SizedBox(width: 10),
+          Text('Radio PX'),
+        ]),
+        actionsPadding: const EdgeInsets.only(right: 8),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sair',
-            onPressed: _logout,
-          ),
+          TextButton(onPressed: _logout, child: const Text('Sair')),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _createChannel,
-        icon: const Icon(Icons.add),
-        label: Text(_creating ? 'Criando...' : 'Novo canal'),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+        child: ContentWidth(child: FilledButton(
+          onPressed: _creating ? null : _createChannel,
+          child: Text(_creating ? 'Criando...' : 'Novo canal'),
+        )),
       ),
-      body: RefreshIndicator(
+      body: ContentWidth(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 28, 24, 24),
+            child: PageHeading(
+              title: 'Seus canais',
+              subtitle: 'Escolha onde a conversa acontece.',
+            ),
+          ),
+          Expanded(child: RefreshIndicator(
         onRefresh: _load,
         child: channels == null
             ? const Center(child: CircularProgressIndicator())
@@ -146,11 +159,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                 ? ListView(
                     children: [
                       const SizedBox(height: 120),
-                      Icon(Icons.radio_outlined,
-                          size: 64, color: Colors.white24),
-                      const SizedBox(height: 12),
                       Text(
-                        _error ?? 'Nenhum canal ainda',
+                        _error ?? 'A conversa começa com um canal.\nCrie o primeiro abaixo.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white54),
                       ),
@@ -158,25 +168,34 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                         TextButton(onPressed: _load, child: const Text('Tentar novamente')),
                     ],
                   )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 88),
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    separatorBuilder: (_, _) => const Divider(),
                     itemCount: channels.length,
                     itemBuilder: (ctx, i) {
                       final ch = channels[i];
                       return ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.wifi_tethering),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        leading: Container(
+                          width: 42, height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E2A),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.tag, color: pxAccent, size: 20),
                         ),
                         title: Text(ch.name),
                         subtitle: Text(
-                          '${ch.members} membro(s)',
+                          '${ch.members} participantes',
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _openChannel(ch),
                       );
                     },
                   ),
-      ),
+          )),
+        ],
+      )),
     );
   }
 }

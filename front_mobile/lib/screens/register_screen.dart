@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../ui.dart';
 import 'channel_list_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -76,7 +77,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Criar conta')),
+      appBar: AppBar(),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -86,15 +87,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Servidor: ${widget.serverUrl}',
-                      style: const TextStyle(color: Colors.white54)),
-                  const SizedBox(height: 24),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: RadioMark(),
+                  ),
+                  const SizedBox(height: 32),
+                  const PageHeading(
+                    title: 'Entre na conversa.',
+                    subtitle: 'Crie sua conta. Escolha um canal. Fale.',
+                  ),
+                  const SizedBox(height: 36),
                   TextField(
                     controller: _userCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Usuário',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -103,8 +109,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     obscureText: true,
                     decoration: const InputDecoration(
                       labelText: 'Senha',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -114,21 +118,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     onSubmitted: (_) => _register(),
                     decoration: const InputDecoration(
                       labelText: 'Confirmar senha',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton.icon(
+                  FilledButton(
                     onPressed: _loading ? null : _register,
-                    icon: _loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.check),
-                    label: const Text('Criar conta'),
+                    child: Text(_loading ? 'Criando...' : 'Criar conta'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
