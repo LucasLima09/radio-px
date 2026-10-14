@@ -34,6 +34,10 @@ class _RoomScreenState extends State<RoomScreen> {
   bool _showMap = false;
   bool _mapReady = false;
   Set<String> _lastFitIds = {};
+  bool _joining = false;
+  bool _startingRecording = false;
+  bool _wasConnected = false;
+  String? _connectionError;
 
   @override
   void initState() {
@@ -76,18 +80,27 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Future<void> _connect() async {
+    if (_joining) return;
+    setState(() { _joining = true; _connectionError = null; });
     try {
       await widget.api.joinChannel(widget.channel.id);
-    } on ApiException catch (e) {
-      _onNotice(e.message);
+      if (!mounted) return;
+      await _radio.connect();
+    } catch (error) {
+      if (mounted) setState(() => _connectionError = error.toString());
+    } finally {
+      if (mounted) setState(() => _joining = false);
     }
-    await _radio.connect();
-    _tracker?.sendLast();
-    if (mounted) setState(() {});
   }
 
   void _onChanged() {
     if (!mounted) return;
+    final connected = _radio.state == radio.RadioConnState.connected;
+    if (connected && !_wasConnected) {
+      _tracker?.sendLast();
+      _connectionError = null;
+    }
+    _wasConnected = connected;
     setState(() {});
     _fitMapIfNeeded();
   }
@@ -112,9 +125,12 @@ class _RoomScreenState extends State<RoomScreen> {
       }
       return;
     }
-    if (_radio.recording) return;
+    if (_radio.recording || _startingRecording) return;
+    _startingRecording = true;
     setState(() => _pttPressed = true);
     _radio.startRecording().then((ok) {
+      _startingRecording = false;
+      if (ok && !_pttPressed) _radio.stopRecordingAndSend();
       if (!ok && mounted) setState(() => _pttPressed = false);
     });
   }
@@ -128,6 +144,8 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
+    _radio.onChanged = null;
+    _radio.onNotice = null;
     _tracker?.stop();
     _radio.dispose();
     super.dispose();
@@ -177,24 +195,18 @@ class _RoomScreenState extends State<RoomScreen> {
                 padding: EdgeInsets.fromLTRB(24, 8, 24, 16),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('NO CANAL', style: TextStyle(
+                  child: Text('PESSOAS NO CANAL', style: TextStyle(
                     color: pxMuted, fontSize: 11,
                     letterSpacing: 1.8, fontWeight: FontWeight.w600,
                   )),
                 ),
               ),
-            if (_radio.recording || _radio.pendingPlaybackCount > 0)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  _radio.recording
-                      ? 'Gravando · escuta pausada'
-                      : _radio.audioPlaying
-                          ? 'Reproduzindo · ${_radio.pendingPlaybackCount} na fila'
-                          : '${_radio.pendingPlaybackCount} áudio(s) na fila',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ),
+            if (_connectionError != null) Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Text(_connectionError!, style: const TextStyle(color: Color(0xFFE79B94)),
+                  maxLines: 3, overflow: TextOverflow.ellipsis),
+            ),
+            _playbackStatus(),
             Expanded(
               child: _showMap ? _mapView() : _membersList(),
             ),
@@ -306,6 +318,10 @@ class _RoomScreenState extends State<RoomScreen> {
   Widget _membersList() {
     final members = [..._radio.members];
     members.sort((a, b) {
+      final playingId = _radio.audioPlaying ? _radio.currentPlayback?.userId : null;
+      final aActive = a.recording || a.userId == playingId;
+      final bActive = b.recording || b.userId == playingId;
+      if (aActive != bActive) return aActive ? -1 : 1;
       if (a.userId == _radio.myUserId) return -1;
       if (b.userId == _radio.myUserId) return 1;
       return a.username.compareTo(b.username);
@@ -326,23 +342,27 @@ class _RoomScreenState extends State<RoomScreen> {
 
   Widget _memberTile(Member member) {
     final isMe = member.userId == _radio.myUserId;
+    final playing = _radio.audioPlaying && _radio.currentPlayback?.userId == member.userId;
+    final active = playing || member.recording;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
       leading: CircleAvatar(
         radius: 18,
-        backgroundColor: const Color(0xFF232330),
+        backgroundColor: active ? pxAccent : const Color(0xFF232330),
         child: Text(member.username.isEmpty ? '?' : member.username[0].toUpperCase(),
-            style: const TextStyle(color: pxAccent, fontSize: 13)),
+            style: TextStyle(color: active ? const Color(0xFF101116) : pxAccent, fontSize: 13)),
       ),
       title: Text(isMe ? '${member.username} (você)' : member.username,
           maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: member.recording
+      subtitle: Text(playing ? 'Falando · reproduzindo agora' : member.recording ? 'Gravando uma fala…' : 'Ouvindo o canal',
+          style: TextStyle(color: active ? pxAccent : pxMuted, fontSize: 12)),
+      trailing: active
           ? const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.mic, size: 16, color: Color(0xFFE79B94)),
+                Icon(Icons.graphic_eq, size: 20, color: pxAccent),
                 SizedBox(width: 6),
-                Text('Gravando', style: TextStyle(
+                Text('Falando', style: TextStyle(
                     color: Color(0xFFE79B94), fontSize: 12)),
               ],
             )
@@ -405,6 +425,41 @@ class _RoomScreenState extends State<RoomScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _playbackStatus() {
+    final current = _radio.currentPlayback;
+    final count = _radio.pendingPlaybackCount;
+    final playing = _radio.audioPlaying && current != null;
+    final speakers = _radio.members.where((member) => member.recording).map((member) => member.username).toList();
+    final title = _radio.recording ? 'Você está falando'
+        : playing ? '${current.username} está falando'
+        : speakers.isNotEmpty ? '${speakers.join(', ')} gravando…'
+        : 'Aguardando a próxima fala';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF1E1C2C),
+          borderRadius: BorderRadius.circular(14), border: Border.all(color: playing || _radio.recording ? pxAccent : pxBorder)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(_radio.recording ? Icons.mic : playing ? Icons.volume_up : Icons.headphones, color: pxAccent),
+          const SizedBox(width: 10),
+          Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 2, overflow: TextOverflow.ellipsis)),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          const Icon(Icons.queue_music, size: 20, color: pxMuted),
+          const SizedBox(width: 8),
+          Expanded(child: Text('$count fala${count == 1 ? '' : 's'} na fila para reproduzir',
+              style: const TextStyle(color: pxMuted, fontSize: 12))),
+        ]),
+        const SizedBox(height: 6),
+        Text(_radio.recording ? 'A escuta continua quando você terminar.'
+            : playing ? 'Reproduzindo agora · próximas falas em ordem.' : 'As falas serão reproduzidas na ordem de chegada.',
+            style: const TextStyle(color: pxMuted, fontSize: 11)),
+      ]),
     );
   }
 

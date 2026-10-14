@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="dark">
   <title>Radio PX · Administração</title>
   <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="stylesheet" href="/admin/leaflet.css">
+  <script src="/admin/leaflet.js" defer></script>
   <script src="/admin/admin.js" defer></script>
 </head>
 <body>
@@ -48,6 +50,14 @@
           <article class="stat"><span>Participações</span><strong id="stat-memberships">—</strong><small>Vínculos entre usuários e canais</small></article>
         </section>
         <p id="dashboard-message" class="message" role="status" aria-live="polite"></p>
+        <section class="data-panel live-panel" aria-labelledby="map-title">
+          <div class="panel-heading"><div><p class="eyebrow">LOCALIZAÇÃO DOS MOTORISTAS</p><h2 id="map-title">Sua frota no mapa</h2><p class="muted">Posições dos motoristas conectados aos canais · atualização a cada 2 segundos.</p></div><button id="fit-drivers" class="secondary">Ver todos</button></div>
+          <div class="map-toolbar"><span id="driver-count" class="count-badge">Carregando posições…</span><span id="map-status" class="muted" role="status" aria-live="polite"></span></div>
+          <div id="driver-map" aria-label="Mapa de localização dos motoristas"></div>
+          <p id="map-message" class="map-message" role="status"></p>
+          <div id="driver-list" class="driver-list"></div>
+          <p class="map-note">O motorista precisa estar em um canal com a localização permitida. Amarelo indica posição sem atualização há mais de 90 segundos. Ao desconectar, ele sai do mapa.</p>
+        </section>
         <section class="data-panel" aria-labelledby="section-title">
           <div class="panel-heading"><div><h2 id="section-title">Canais</h2><p id="section-description" class="muted">Consulte os canais e remova os que não são mais necessários.</p></div><span id="result-count" class="count-badge">—</span></div>
           <form id="search-form" class="search-form" role="search"><label class="sr-only" for="search">Buscar por nome</label><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Buscar canal por nome…" maxlength="100" autocomplete="off"><button class="secondary" type="submit">Buscar</button></form>

@@ -12,9 +12,12 @@ enum RecordMode {
 
 class AppConfig {
   static const _serverKey = 'server_url';
+  static const _compiledServerKey = 'compiled_server_url';
   static const _recordModeKey = 'record_mode';
 
   static String get defaultServerUrl {
+    const configured = String.fromEnvironment('SERVER_URL');
+    if (configured.isNotEmpty) return configured;
     if (kIsWeb) return 'http://localhost:8080';
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8080';
@@ -24,7 +27,16 @@ class AppConfig {
 
   static Future<String> loadServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_serverKey) ?? defaultServerUrl;
+    final saved = prefs.getString(_serverKey);
+    const configured = String.fromEnvironment('SERVER_URL');
+    // Apply a new bundled endpoint once; later manual edits remain available.
+    if (configured.isNotEmpty && configured.startsWith('https://') &&
+        prefs.getString(_compiledServerKey) != configured) {
+      await prefs.setString(_serverKey, configured);
+      await prefs.setString(_compiledServerKey, configured);
+      return configured;
+    }
+    return saved ?? defaultServerUrl;
   }
 
   static Future<void> saveServerUrl(String value) async {

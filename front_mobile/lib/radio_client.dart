@@ -74,8 +74,10 @@ class RadioClient {
   bool _muted = false;
   final List<QueuedAudio> _queue = [];
   QueuedAudio? _current;
-  int get pendingPlaybackCount => _queue.isEmpty ? (_playing ? 1 : 0) : _queue.length + (_playing ? 1 : 0);
-  bool get audioPlaying => _playing;
+  int get pendingPlaybackCount => _queue.length;
+  bool get audioPlaying => _playing && !_muted;
+  AudioClip? get currentPlayback => _current?.meta;
+  List<AudioClip> get queuedPlayback => List.unmodifiable(_queue.map((item) => item.meta));
 
   // Gravação em andamento.
   String? _recordingPath;
@@ -96,9 +98,9 @@ class RadioClient {
   Future<void> connect() async {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    if (_connecting || _state == RadioConnState.connected) return;
-    _disposed = false;
+    if (_disposed || _connecting || _state == RadioConnState.connected) return;
     _setState(RadioConnState.connecting);
+    _notify();
     _connecting = true;
     _playerSub ??= _player.playerStateStream.listen((ps) {
       if (ps.processingState == ProcessingState.completed && _playing) {
@@ -107,7 +109,9 @@ class RadioClient {
     });
     try {
       final token = await tokenProvider();
+      if (_disposed) return;
       _lastHeardSeq = await AppConfig.loadLastHeardSeq(channelId);
+      if (_disposed) return;
       final wsBase = baseUrl.replaceFirst(RegExp(r'^http'), 'ws');
       final uri = Uri.parse('$wsBase/ws').replace(queryParameters: {
         'token': token,
@@ -117,6 +121,11 @@ class RadioClient {
       _ws = await openWsChannel(uri, {
         'ngrok-skip-browser-warning': '1',
       });
+      await _ws!.ready.timeout(const Duration(seconds: 15));
+      if (_disposed) {
+        await _ws!.sink.close();
+        return;
+      }
       _sub = _ws!.stream.listen(
         _enqueue,
         onError: (_) => _onClosed(),
@@ -131,7 +140,8 @@ class RadioClient {
         _onClosed();
       }
     } catch (_) {
-      _onClosed();
+      if (!_disposed) onNotice?.call('Não foi possível conectar ao canal. Tentando novamente…');
+      await _onClosed();
     } finally {
       _connecting = false;
     }
@@ -336,7 +346,7 @@ class RadioClient {
     }
 
     if (_current != null && _playing) {
-      await _player.play().catchError((_) {});
+      unawaited(_player.play().catchError((_) {}));
     } else {
       _playNext();
     }

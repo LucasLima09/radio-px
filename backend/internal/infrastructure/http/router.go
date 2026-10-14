@@ -52,6 +52,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 			r.Use(httpmw.Authenticate(deps.TokenManager, deps.Users))
 			r.Use(httpmw.RequireAdmin(deps.AdminUserIDs))
 			r.Get("/me", adminHandler.Me)
+			r.Get("/locations", adminHandler.Locations)
 			r.Get("/summary", adminHandler.Summary)
 			r.Get("/users", adminHandler.Users)
 			r.Get("/channels", adminHandler.Channels)

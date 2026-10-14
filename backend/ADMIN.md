@@ -1,5 +1,24 @@
 # Painel admin
 
+## Mapa dos motoristas
+
+O mapa aparece acima das listas, com nome do motorista, canal e horário da
+última posição. O painel consulta `/api/v1/admin/locations` a cada 2 segundos
+(a cada 10 segundos quando a aba está em segundo plano). A rota exige login
+administrativo e não permite cache.
+
+O aplicativo já envia GPS ao entrar em um canal, com permissão de localização:
+ao se mover cerca de 10 metros e a cada 30 segundos quando parado. O mapa
+mostra somente conexões que enviaram posição; ao desconectar, o marcador sai.
+Posições com mais de 90 segundos ficam amarelas. Se uma conta estiver em
+vários aparelhos ou canais, aparece somente sua posição mais recente.
+
+Clique no motorista para aproximar o mapa ou em **Ver todos** para enquadrar
+a frota. Sem motoristas, o painel mostra uma orientação para habilitar o GPS.
+A biblioteca Leaflet está incorporada ao backend; as imagens do mapa vêm do
+OpenStreetMap e exigem conexão com a internet. A licença está em
+`internal/infrastructure/http/adminui/LEAFLET-LICENSE.txt`.
+
 O backend serve o painel em `http://localhost:8080/admin`, sem instalação de frontend separada. Os arquivos estão incorporados ao binário Go.
 
 Funções: consultar totais, buscar usuários, buscar canais e excluir canais. A exclusão exige confirmação e é bloqueada enquanto houver participantes conectados. As listas têm paginação de 20 registros.

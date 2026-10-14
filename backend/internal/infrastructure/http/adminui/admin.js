@@ -63,6 +63,7 @@ async function request(path, options = {}, retry = true) {
 }
 
 function showLogin() {
+  stopDriverMap();
   session = null;
   authGeneration++;
   refreshPromise = null;
@@ -89,6 +90,7 @@ $('login-form').addEventListener('submit', async (event) => {
     $('password').value = '';
     $('login-view').hidden = true;
     $('dashboard-view').hidden = false;
+    startDriverMap();
     tab = 'channels'; page = 1; query = ''; $('search').value = '';
     updateTab();
     await load();
@@ -137,7 +139,7 @@ $('search-form').addEventListener('submit', (event) => { event.preventDefault();
 $('search').addEventListener('search', () => { if (!$('search').value) { query = ''; page = 1; load(); } });
 $('previous').addEventListener('click', () => { if (page > 1) { page--; load(); } });
 $('next').addEventListener('click', () => { page++; load(); });
-$('refresh').addEventListener('click', () => load());
+$('refresh').addEventListener('click', () => { load(); refreshDrivers(); });
 
 function element(tag, text = '', className = '') {
   const node = document.createElement(tag);
@@ -244,3 +246,112 @@ $('delete-form').addEventListener('submit', async (event) => {
     $('confirm-delete').textContent = 'Excluir canal';
   }
 });
+
+let driverMap = null;
+let driverTimer = null;
+let driverEpoch = 0;
+let driverBusy = false;
+let driverMarkers = new Map();
+let drivers = [];
+let framedDrivers = false;
+
+function stopDriverMap() {
+  driverEpoch++;
+  clearTimeout(driverTimer);
+  driverTimer = null;
+  driverBusy = false;
+  drivers = [];
+  driverMarkers.forEach(marker => marker.remove());
+  driverMarkers.clear();
+  $('driver-list').replaceChildren();
+  framedDrivers = false;
+}
+
+function startDriverMap() {
+  stopDriverMap();
+  if (!window.L) {
+    $('map-message').textContent = 'Não foi possível carregar o mapa. Recarregue a página.';
+    return;
+  }
+  if (!driverMap) {
+    driverMap = L.map('driver-map').setView([-14.2, -51.9], 4);
+    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(driverMap);
+    tiles.on('tileerror', () => {
+      $('map-message').textContent = 'Não foi possível carregar parte do mapa. Verifique a conexão com a internet.';
+    });
+  }
+  requestAnimationFrame(() => driverMap.invalidateSize());
+  $('driver-count').textContent = 'Carregando posições…';
+  $('map-status').textContent = '';
+  refreshDrivers();
+}
+
+function fitDrivers() {
+  if (drivers.length) driverMap.fitBounds(drivers.map(d => [d.lat, d.lng]), { padding: [40, 40], maxZoom: 15 });
+}
+$('fit-drivers').addEventListener('click', fitDrivers);
+
+function renderDrivers() {
+  const ids = new Set(drivers.map(d => d.userId));
+  driverMarkers.forEach((marker, id) => {
+    if (!ids.has(id)) { marker.remove(); driverMarkers.delete(id); }
+  });
+  $('driver-list').replaceChildren();
+  let staleCount = 0;
+  for (const driver of drivers) {
+    const age = Math.max(0, Math.floor((Date.now() - new Date(driver.updatedAt).getTime()) / 1000));
+    const stale = age > 90;
+    if (stale) staleCount++;
+    const time = new Date(driver.updatedAt).toLocaleTimeString('pt-BR');
+    const detail = `${driver.channel} · ${stale ? 'Posição antiga' : 'Posição recente'} · GPS às ${time}`;
+    const popup = element('div');
+    popup.append(element('strong', driver.username), element('p', detail));
+    let marker = driverMarkers.get(driver.userId);
+    if (!marker) {
+      marker = L.circleMarker([driver.lat, driver.lng], { radius: 9, weight: 3, fillOpacity: .9 }).addTo(driverMap);
+      marker.bindPopup(popup);
+      driverMarkers.set(driver.userId, marker);
+    } else {
+      marker.setLatLng([driver.lat, driver.lng]);
+      marker.setPopupContent(popup);
+    }
+    marker.setStyle({ color: stale ? '#dca648' : '#218d75', fillColor: stale ? '#ffd27a' : '#80e1c3' });
+    const button = element('button', '', 'driver-card');
+    button.append(element('strong', driver.username), element('small', detail));
+    button.addEventListener('click', () => { driverMap.setView([driver.lat, driver.lng], 16); marker.openPopup(); });
+    $('driver-list').append(button);
+  }
+  $('driver-count').textContent = `${drivers.length} motorista${drivers.length === 1 ? '' : 's'} no mapa`;
+  $('map-message').textContent = drivers.length ? (staleCount ? `${staleCount} posição(ões) aguardando atualização do GPS.` : '') : 'Nenhum motorista compartilhando localização. Entre em um canal no aplicativo e permita o GPS para aparecer aqui.';
+  $('fit-drivers').disabled = drivers.length === 0;
+  if (drivers.length && !framedDrivers) { fitDrivers(); framedDrivers = true; }
+}
+
+async function refreshDrivers() {
+  if (!session || !driverMap || driverBusy) return;
+  clearTimeout(driverTimer);
+  const epoch = driverEpoch;
+  driverBusy = true;
+  try {
+    const data = await request('/admin/locations', { signal: AbortSignal.timeout(15000) });
+    if (epoch !== driverEpoch || !session) return;
+    drivers = data;
+    renderDrivers();
+    $('map-status').textContent = `Sincronizado às ${new Date().toLocaleTimeString('pt-BR')}`;
+  } catch (error) {
+    if (epoch !== driverEpoch || !session) return;
+    if (error.status === 403) { showLogin(); message('login-message', error.message); return; }
+    $('map-status').textContent = 'Sem conexão · tentando novamente';
+    $('map-message').textContent = 'Atualização interrompida. Os marcadores mostram a última posição recebida.';
+  } finally {
+    if (epoch === driverEpoch) {
+      driverBusy = false;
+      if (session) driverTimer = setTimeout(refreshDrivers, document.hidden ? 10000 : 2000);
+    }
+  }
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDrivers(); });

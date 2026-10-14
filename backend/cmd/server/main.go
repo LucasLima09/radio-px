@@ -64,6 +64,14 @@ func main() {
 		AdminUserIDs: cfg.AdminUserIDs,
 	})
 
+	if apkPath := os.Getenv("APK_PATH"); apkPath != "" {
+		router.Get("/downloads/radio-px.apk", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+			w.Header().Set("Content-Disposition", `attachment; filename="radio-px.apk"`)
+			http.ServeFile(w, r, apkPath)
+		})
+	}
+
 	server := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           router,

@@ -29,6 +29,11 @@ func (h *AdminHandler) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u.Public())
 }
 
+func (h *AdminHandler) Locations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, h.ws.DriverLocations())
+}
+
 func (h *AdminHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	result, err := h.repo.Summary(r.Context())
 	if err != nil {

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../ui.dart';
 import '../config.dart';
-import '../models.dart';
 import '../session_store.dart';
 import 'channel_list_screen.dart';
 import 'register_screen.dart';
@@ -21,7 +20,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passCtrl = TextEditingController();
 
   bool _loading = false;
-  PublicUser? _savedUser;
+  String? _error;
+  bool _restoring = true;
 
   @override
   void initState() {
@@ -30,11 +30,16 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _restore() async {
-    final session = await SessionStore.load();
-    if (!mounted) return;
-    _serverCtrl.text = await AppConfig.loadServerUrl();
-    if (session != null) {
-      setState(() => _savedUser = session.user);
+    try {
+      final server = await AppConfig.loadServerUrl();
+      final saved = await SessionStore.load();
+      if (!mounted) return;
+      _serverCtrl.text = server;
+      _userCtrl.text = saved?.user.username ?? '';
+    } catch (error) {
+      if (mounted) _error = 'Não foi possível carregar as configurações: $error';
+    } finally {
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -58,15 +63,18 @@ class _LoginScreenState extends State<LoginScreen> {
     return url;
   }
 
-  Future<void> _login({bool asSaved = false}) async {
-    setState(() => _loading = true);
+  Future<void> _login() async {
+    if (_loading || _restoring) return;
+    if (_userCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
+      _showError('Preencha o usuário e a senha.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
     try {
       final serverUrl = _normalizedServerUrl();
       await AppConfig.saveServerUrl(serverUrl);
       final api = ApiClient(serverUrl);
-      final session = asSaved
-          ? (await SessionStore.load())!
-          : await api.login(_userCtrl.text.trim(), _passCtrl.text);
+      final session = await api.login(_userCtrl.text.trim(), _passCtrl.text);
       api.setSession(session);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -76,8 +84,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on ApiException catch (e) {
       _showError(e.message);
-    } catch (_) {
-      _showError('Não foi possível conectar ao servidor');
+    } catch (error) {
+      _showError('Não foi possível entrar: $error');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -94,8 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    setState(() => _error = message);
   }
 
   @override
@@ -117,8 +124,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 32),
                   const PageHeading(
-                    title: 'Sua voz.\nMais perto.',
-                    subtitle: 'Entre no Radio PX e conecte-se ao seu canal.',
+                    title: 'Entre no Radio PX',
+                    subtitle: 'Faça login, escolha um canal e comece a falar.',
                   ),
                   const SizedBox(height: 36),
                   TextField(
@@ -137,8 +144,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  if (_error != null) Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE79B94), fontSize: 13)),
+                  ),
                   FilledButton(
-                    onPressed: _loading ? null : _login,
+                    onPressed: _loading || _restoring ? null : _login,
                     child: Text(_loading ? 'Entrando...' : 'Entrar'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -172,13 +183,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
                     ),
                   ),
-                  if (_savedUser != null) ...[
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: _loading ? null : () => _login(asSaved: true),
-                      child: Text('Continuar como ${_savedUser!.username}'),
-                    ),
-                  ],
                 ],
               ),
             ),

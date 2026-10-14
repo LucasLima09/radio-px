@@ -89,17 +89,17 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         _creating = false;
       });
       _openChannel(channel);
-    } on ApiException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _creating = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
   Future<void> _openChannel(Channel channel) async {
     if (!mounted) return;
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => RoomScreen(
           api: widget.api,
@@ -108,6 +108,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         ),
       ),
     );
+    if (mounted) await _load();
   }
 
   Future<void> _logout() async {
@@ -148,7 +149,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
             padding: EdgeInsets.fromLTRB(24, 28, 24, 24),
             child: PageHeading(
               title: 'Seus canais',
-              subtitle: 'Escolha onde a conversa acontece.',
+              subtitle: 'Entre para ver quem está no canal, ouvir e falar.',
             ),
           ),
           Expanded(child: RefreshIndicator(
@@ -186,7 +187,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                         ),
                         title: Text(ch.name),
                         subtitle: Text(
-                          '${ch.members} participantes',
+                          '${ch.members} inscritos · toque para entrar',
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _openChannel(ch),
