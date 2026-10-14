@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -12,18 +13,22 @@ type Room struct {
 	id   uuid.UUID
 	name string
 
-	mu        sync.RWMutex
-	clients   map[*Client]struct{}
-	recording map[*Client]struct{}
+	mu            sync.RWMutex
+	clients       map[*Client]struct{}
+	locations     map[*Client]locationInfo
+	recording     map[*Client]struct{}
+	locationTimes map[*Client]time.Time
 }
 
 func newRoom(hub *Hub, id uuid.UUID, name string) *Room {
 	return &Room{
-		hub:       hub,
-		id:        id,
-		name:      name,
-		clients:   make(map[*Client]struct{}),
-		recording: make(map[*Client]struct{}),
+		hub:           hub,
+		id:            id,
+		name:          name,
+		clients:       make(map[*Client]struct{}),
+		locations:     make(map[*Client]locationInfo),
+		recording:     make(map[*Client]struct{}),
+		locationTimes: make(map[*Client]time.Time),
 	}
 }
 
@@ -65,6 +70,28 @@ func (r *Room) broadcast(m outboundMessage) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	r.broadcastLocked(m)
+}
+
+// updateLocation stores the latest known position for a member and broadcasts
+// it to every client in the room.
+func (r *Room) updateLocation(c *Client, lat, lng float64) {
+	r.mu.Lock()
+	r.locations[c] = locationInfo{UserID: c.user.ID, Username: c.user.Username, Lat: lat, Lng: lng}
+	r.locationTimes[c] = time.Now().UTC()
+	r.broadcastLocked(outboundMessage{Type: msgLocationUpdate, UserID: c.user.ID, Username: c.user.Username, Lat: lat, Lng: lng})
+	r.mu.Unlock()
+}
+
+// allLocations returns the last known position of every member that has
+// reported one. Used to build the joined snapshot for a new client.
+func (r *Room) allLocations() []locationInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]locationInfo, 0, len(r.locations))
+	for _, loc := range r.locations {
+		out = append(out, loc)
+	}
+	return out
 }
 
 // setRecording flips a member's recording state and notifies everyone.
@@ -113,6 +140,8 @@ func (r *Room) remove(c *Client) {
 		return
 	}
 	delete(r.clients, c)
+	delete(r.locations, c)
+	delete(r.locationTimes, c)
 	delete(r.recording, c)
 	r.broadcastLocked(outboundMessage{Type: msgPeerLeft, UserID: c.user.ID})
 	empty := len(r.clients) == 0

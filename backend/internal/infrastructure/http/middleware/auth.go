@@ -62,7 +62,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 // RequireAdmin rejeita quem não tem role admin. Deve ser usado DEPOIS de
 // Authenticate, que carrega o usuário no contexto.
-func RequireAdmin(next http.Handler) http.Handler {
+func RequireRoleAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, ok := UserFromContext(r.Context())
 		if !ok || u.Role != user.RoleAdmin {

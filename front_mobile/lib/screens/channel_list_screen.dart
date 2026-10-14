@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../background/beacon_controller.dart';
+import '../ui.dart';
 import '../models.dart';
 import '../session_store.dart';
 import '../widgets/profile_avatar.dart';
@@ -68,7 +69,6 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'Nome do canal',
-            border: OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -105,23 +105,23 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         _creating = false;
       });
       _openChannel(channel);
-    } on ApiException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _creating = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
   Future<void> _openChannel(Channel channel) async {
     if (!mounted) return;
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
             RoomScreen(api: widget.api, channel: channel, myUser: _user),
       ),
     );
+    if (mounted) await _load();
   }
 
   Future<void> _logout() async {
@@ -141,11 +141,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       appBar: AppBar(
         title: Text(_tab == 0 ? 'Canais' : 'Meu perfil'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sair',
-            onPressed: _logout,
-          ),
+          TextButton(onPressed: _logout, child: const Text('Sair')),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -189,7 +185,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _error ?? 'Nenhum canal ainda',
+                        _error ?? 'A conversa começa com um canal.\nCrie o primeiro abaixo.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white54),
                       ),
@@ -200,14 +196,21 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                         ),
                     ],
                   )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 88),
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    separatorBuilder: (_, _) => const Divider(),
                     itemCount: channels.length,
                     itemBuilder: (ctx, i) {
                       final ch = channels[i];
                       return ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.wifi_tethering),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        leading: Container(
+                          width: 42, height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E2A),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.tag, color: pxAccent, size: 20),
                         ),
                         title: Text(ch.name),
                         subtitle: Text('${ch.members} membro(s)'),

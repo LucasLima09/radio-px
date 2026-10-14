@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
@@ -170,8 +171,14 @@ class ApiClient {
     final req = http.Request(method, _uri(path));
     req.headers.addAll(_headers(authed));
     if (body != null) req.body = jsonEncode(body);
-    final streamed = await req.send().timeout(_timeout);
-    return http.Response.fromStream(streamed);
+    try {
+      final streamed = await req.send().timeout(_timeout);
+      return await http.Response.fromStream(streamed).timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException(0, 'O servidor $baseUrl não respondeu em 15 segundos. Verifique a conexão e o endereço.');
+    } on http.ClientException catch (error) {
+      throw ApiException(0, 'Falha ao acessar $baseUrl: ${error.message}');
+    }
   }
 
   Map<String, String> _headers(bool authed) => {

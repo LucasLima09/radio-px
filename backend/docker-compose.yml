@@ -29,6 +29,7 @@ services:
       DATABASE_URL: postgres://radio:radio@localhost:5432/radio_px?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-please-change-32char}
       HTTP_PORT: "8080"
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
       REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
       STUN_SERVERS: ${STUN_SERVERS:-stun:stun.l.google.com:19302}

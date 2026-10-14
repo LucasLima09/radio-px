@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 
-.PHONY: help dev up down logs restart psql db-only migrate-up reset-db test build fmt vet clean
+.PHONY: help dev up down logs restart psql db-only migrate-up reset-db build fmt vet clean
 
 ## Dev: builds, starts db + api with Air hot reload in foreground
 dev:
@@ -39,10 +39,6 @@ migrate-up:
 reset-db:
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d --build
-
-## Run tests locally (requires go toolchain)
-test:
-	go test ./...
 
 ## Build the binary locally
 build:

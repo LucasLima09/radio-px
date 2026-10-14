@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../api.dart';
+import '../ui.dart';
 import '../config.dart';
+import '../location_tracker.dart';
 import '../models.dart';
 import '../radio_client.dart' as radio;
 
@@ -23,8 +27,17 @@ class RoomScreen extends StatefulWidget {
 
 class _RoomScreenState extends State<RoomScreen> {
   late final radio.RadioClient _radio;
+  final MapController _mapController = MapController();
+  LocationTracker? _tracker;
   RecordMode _recordMode = RecordMode.hold;
   bool _pttPressed = false;
+  bool _showMap = false;
+  bool _mapReady = false;
+  Set<String> _lastFitIds = {};
+  bool _joining = false;
+  bool _startingRecording = false;
+  bool _wasConnected = false;
+  String? _connectionError;
 
   @override
   void initState() {
@@ -37,6 +50,7 @@ class _RoomScreenState extends State<RoomScreen> {
     _radio.onChanged = _onChanged;
     _radio.onNotice = _onNotice;
     _loadRecordMode();
+    _initLocation();
     _connect();
   }
 
@@ -52,19 +66,43 @@ class _RoomScreenState extends State<RoomScreen> {
     await AppConfig.saveRecordMode(next);
   }
 
+  Future<void> _initLocation() async {
+    final tracker = LocationTracker()
+      ..onPosition = _onPosition
+      ..onError = _onNotice;
+    _tracker = tracker;
+    await tracker.start();
+    if (mounted) setState(() {});
+  }
+
+  void _onPosition(double lat, double lng) {
+    _radio.sendLocation(lat, lng);
+  }
+
   Future<void> _connect() async {
+    if (_joining) return;
+    setState(() { _joining = true; _connectionError = null; });
     try {
       await widget.api.joinChannel(widget.channel.id);
-    } on ApiException catch (e) {
-      _onNotice(e.message);
+      if (!mounted) return;
+      await _radio.connect();
+    } catch (error) {
+      if (mounted) setState(() => _connectionError = error.toString());
+    } finally {
+      if (mounted) setState(() => _joining = false);
     }
-    await _radio.connect();
-    if (mounted) setState(() {});
   }
 
   void _onChanged() {
     if (!mounted) return;
+    final connected = _radio.state == radio.RadioConnState.connected;
+    if (connected && !_wasConnected) {
+      _tracker?.sendLast();
+      _connectionError = null;
+    }
+    _wasConnected = connected;
     setState(() {});
+    _fitMapIfNeeded();
   }
 
   void _onNotice(String message) {
@@ -87,9 +125,12 @@ class _RoomScreenState extends State<RoomScreen> {
       }
       return;
     }
-    if (_radio.recording) return;
+    if (_radio.recording || _startingRecording) return;
+    _startingRecording = true;
     setState(() => _pttPressed = true);
     _radio.startRecording().then((ok) {
+      _startingRecording = false;
+      if (ok && !_pttPressed) _radio.stopRecordingAndSend();
       if (!ok && mounted) setState(() => _pttPressed = false);
     });
   }
@@ -103,6 +144,9 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
+    _radio.onChanged = null;
+    _radio.onNotice = null;
+    _tracker?.stop();
     _radio.dispose();
     super.dispose();
   }
@@ -116,43 +160,168 @@ class _RoomScreenState extends State<RoomScreen> {
         title: Text(widget.channel.name),
         actions: [
           IconButton(
-            icon: Icon(_recordMode == RecordMode.hold
-                ? Icons.pan_tool_outlined
-                : Icons.touch_app_outlined),
-            tooltip: _recordMode == RecordMode.hold
-                ? 'Gravação: segurar para falar'
-                : 'Gravação: toque para começar/parar',
-            onPressed: _toggleRecordMode,
+            icon: Icon(_showMap ? Icons.group : Icons.map_outlined),
+            tooltip: _showMap ? 'Ver membros' : 'Ver mapa',
+            onPressed: () => setState(() => _showMap = !_showMap),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: _ConnectionChip(
-                state: state,
-                onTap: state == radio.RadioConnState.connected ? null : _connect,
+          PopupMenuButton<String>(
+            tooltip: 'Opções',
+            onSelected: (value) {
+              if (value == 'mode') _toggleRecordMode();
+              if (value == 'reconnect') _connect();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'mode',
+                child: Text(_recordMode == RecordMode.hold
+                    ? 'Mudar para toque'
+                    : 'Mudar para segurar'),
               ),
-            ),
+              if (state == radio.RadioConnState.disconnected)
+                const PopupMenuItem(
+                  value: 'reconnect',
+                  child: Text('Reconectar'),
+                ),
+            ],
           ),
         ],
       ),
       body: SafeArea(
-        child: Column(
+        child: ContentWidth(child: Column(
           children: [
-            _PresenceBanner(client: _radio),
-            _QueueStatusLine(client: _radio),
-            if (_radio.members.any((m) => m.recording))
-              _RecordingBanner(client: _radio),
-            Expanded(child: _membersList()),
+            _RoomStatus(client: _radio),
+            if (!_showMap)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('PESSOAS NO CANAL', style: TextStyle(
+                    color: pxMuted, fontSize: 11,
+                    letterSpacing: 1.8, fontWeight: FontWeight.w600,
+                  )),
+                ),
+              ),
+            if (_connectionError != null) Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Text(_connectionError!, style: const TextStyle(color: Color(0xFFE79B94)),
+                  maxLines: 3, overflow: TextOverflow.ellipsis),
+            ),
+            _playbackStatus(),
+            Expanded(
+              child: _showMap ? _mapView() : _membersList(),
+            ),
             _recordArea(state),
           ],
-        ),
+        )),
       ),
     );
+  }
+
+  Widget _mapView() {
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: const LatLng(-23.5505, -46.6333),
+            initialZoom: 13,
+            onMapReady: () {
+              _mapReady = true;
+              _fitMapIfNeeded();
+            },
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'br.com.radiopx',
+            ),
+            MarkerLayer(markers: _buildMarkers()),
+          ],
+        ),
+        if (_radio.locations.isEmpty)
+          Center(
+            child: Card(
+              color: Colors.black.withValues(alpha: 0.6),
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Aguardando posição dos participantes...'),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Marker> _buildMarkers() {
+    return _radio.locations.values.map((loc) {
+      final isMe = loc.userId == _radio.myUserId;
+      final label = loc.username.isEmpty ? '?' : loc.username[0].toUpperCase();
+      return Marker(
+        point: LatLng(loc.lat, loc.lng),
+        width: 96,
+        height: 72,
+        alignment: Alignment.topCenter,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: isMe ? const Color(0xFF525E68) : const Color(0xFF35383D),
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 16, color: Colors.white),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isMe ? 'Você' : loc.username,
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  void _fitMapIfNeeded() {
+    if (!_showMap || !_mapReady) return;
+    final ids = _radio.locations.keys.toSet();
+    if (ids.isEmpty || ids == _lastFitIds) return;
+    _lastFitIds = ids;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mapReady) return;
+      final locs = _radio.locations.values.toList();
+      if (locs.isEmpty) return;
+      final coords = locs.map((l) => LatLng(l.lat, l.lng)).toList();
+      try {
+        if (coords.length == 1) {
+          _mapController.move(coords.first, 16);
+        } else {
+          _mapController.fitCamera(CameraFit.coordinates(
+            coordinates: coords,
+            padding: const EdgeInsets.all(56),
+          ));
+        }
+      } catch (_) {}
+    });
   }
 
   Widget _membersList() {
     final members = [..._radio.members];
     members.sort((a, b) {
+      final playingId = _radio.audioPlaying ? _radio.currentPlayback?.userId : null;
+      final aActive = a.recording || a.userId == playingId;
+      final bActive = b.recording || b.userId == playingId;
+      if (aActive != bActive) return aActive ? -1 : 1;
       if (a.userId == _radio.myUserId) return -1;
       if (b.userId == _radio.myUserId) return 1;
       return a.username.compareTo(b.username);
@@ -163,64 +332,42 @@ class _RoomScreenState extends State<RoomScreen> {
             child: Text('Aguardando participantes...',
                 style: TextStyle(color: Colors.white54)),
           )
-        : GridView.count(
-            crossAxisCount: 3,
-            padding: const EdgeInsets.all(16),
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            children: members.map(_memberTile).toList(),
+        : ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            itemCount: members.length,
+            separatorBuilder: (_, _) => const Divider(),
+            itemBuilder: (_, index) => _memberTile(members[index]),
           );
   }
 
   Widget _memberTile(Member member) {
     final isMe = member.userId == _radio.myUserId;
-    final isRecording = member.recording;
-
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Stack(
-          children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor:
-                  isRecording ? Colors.orange.shade700 : Colors.white12,
-              child: Text(
-                member.username.isEmpty ? '?' : member.username[0].toUpperCase(),
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-            ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isRecording ? Colors.orange : Colors.greenAccent,
-                  border: Border.all(color: Colors.black, width: 2),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          isMe ? 'Você' : member.username,
-          style: TextStyle(
-            fontWeight: isRecording ? FontWeight.bold : FontWeight.normal,
-            fontSize: 13,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (isRecording)
-          const Text(
-            'gravando',
-            style: TextStyle(color: Colors.orange, fontSize: 11),
-          ),
-      ],
+    final playing = _radio.audioPlaying && _radio.currentPlayback?.userId == member.userId;
+    final active = playing || member.recording;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: active ? pxAccent : const Color(0xFF232330),
+        child: Text(member.username.isEmpty ? '?' : member.username[0].toUpperCase(),
+            style: TextStyle(color: active ? const Color(0xFF101116) : pxAccent, fontSize: 13)),
+      ),
+      title: Text(isMe ? '${member.username} (você)' : member.username,
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(playing ? 'Falando · reproduzindo agora' : member.recording ? 'Gravando uma fala…' : 'Ouvindo o canal',
+          style: TextStyle(color: active ? pxAccent : pxMuted, fontSize: 12)),
+      trailing: active
+          ? const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.graphic_eq, size: 20, color: pxAccent),
+                SizedBox(width: 6),
+                Text('Falando', style: TextStyle(
+                    color: Color(0xFFE79B94), fontSize: 12)),
+              ],
+            )
+          : const Text('Online',
+              style: TextStyle(color: Colors.white54, fontSize: 12)),
     );
   }
 
@@ -247,42 +394,72 @@ class _RoomScreenState extends State<RoomScreen> {
         onPointerCancel: connected ? (_) => _recordReleased() : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          width: 180,
-          height: 180,
+          width: 144,
+          height: 144,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: active
-                ? Colors.redAccent
+                ? const Color(0xFF9B4540)
                 : connected
-                    ? const Color(0xFF1565C0)
-                    : Colors.white12,
-            boxShadow: [
-              BoxShadow(
-                color: (active ? Colors.redAccent : const Color(0xFF1565C0))
-                    .withValues(alpha: 0.4),
-                blurRadius: active ? 40 : 24,
-                spreadRadius: active ? 8 : 2,
-              ),
-            ],
+                    ? const Color(0xFFB9B2FF)
+                    : const Color(0xFF25282C),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 active ? Icons.mic : Icons.mic_none,
-                size: 56,
-                color: Colors.white,
+                size: 36,
+                color: connected && !active ? const Color(0xFF101116) : Colors.white,
               ),
               const SizedBox(height: 8),
               Text(
                 _recordLabel(connected, active),
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+                style: TextStyle(
+                  color: connected && !active ? const Color(0xFF101116) : Colors.white,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _playbackStatus() {
+    final current = _radio.currentPlayback;
+    final count = _radio.pendingPlaybackCount;
+    final playing = _radio.audioPlaying && current != null;
+    final speakers = _radio.members.where((member) => member.recording).map((member) => member.username).toList();
+    final title = _radio.recording ? 'Você está falando'
+        : playing ? '${current.username} está falando'
+        : speakers.isNotEmpty ? '${speakers.join(', ')} gravando…'
+        : 'Aguardando a próxima fala';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF1E1C2C),
+          borderRadius: BorderRadius.circular(14), border: Border.all(color: playing || _radio.recording ? pxAccent : pxBorder)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(_radio.recording ? Icons.mic : playing ? Icons.volume_up : Icons.headphones, color: pxAccent),
+          const SizedBox(width: 10),
+          Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 2, overflow: TextOverflow.ellipsis)),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          const Icon(Icons.queue_music, size: 20, color: pxMuted),
+          const SizedBox(width: 8),
+          Expanded(child: Text('$count fala${count == 1 ? '' : 's'} na fila para reproduzir',
+              style: const TextStyle(color: pxMuted, fontSize: 12))),
+        ]),
+        const SizedBox(height: 6),
+        Text(_radio.recording ? 'A escuta continua quando você terminar.'
+            : playing ? 'Reproduzindo agora · próximas falas em ordem.' : 'As falas serão reproduzidas na ordem de chegada.',
+            style: const TextStyle(color: pxMuted, fontSize: 11)),
+      ]),
     );
   }
 
@@ -299,190 +476,31 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 }
 
-class _ConnectionChip extends StatelessWidget {
-  const _ConnectionChip({required this.state, this.onTap});
-
-  final radio.RadioConnState state;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final (color, label) = switch (state) {
-      radio.RadioConnState.connected => (Colors.greenAccent, 'Conectado'),
-      radio.RadioConnState.connecting => (Colors.orange, 'Conectando'),
-      radio.RadioConnState.disconnected => (Colors.redAccent, 'Reconectar'),
-    };
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withValues(alpha: 0.6)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.circle, size: 10, color: color),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(fontSize: 12)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PresenceBanner extends StatelessWidget {
-  const _PresenceBanner({required this.client});
+class _RoomStatus extends StatelessWidget {
+  const _RoomStatus({required this.client});
 
   final radio.RadioClient client;
 
   @override
   Widget build(BuildContext context) {
-    final others =
-        client.members.where((m) => m.userId != client.myUserId).length;
-
-    final (Color color, IconData icon, String text) = switch (client.state) {
-      radio.RadioConnState.connecting => (
-          Colors.orange,
-          Icons.hourglass_top,
-          'Conectando ao canal...',
-        ),
-      radio.RadioConnState.disconnected => (
-          Colors.redAccent,
-          Icons.cloud_off,
-          'Conexão perdida',
-        ),
-      radio.RadioConnState.connected when others == 0 => (
-          Colors.redAccent,
-          Icons.person_off_outlined,
-          'Você está sozinho no canal',
-        ),
-      radio.RadioConnState.connected => (
-          Colors.greenAccent,
-          Icons.people_alt_outlined,
-          others == 1
-              ? '1 outra pessoa conectada'
-              : '$others outras pessoas conectadas',
-        ),
+    final others = client.members.where((m) => m.userId != client.myUserId).length;
+    final label = switch (client.state) {
+      radio.RadioConnState.connecting => 'Conectando...',
+      radio.RadioConnState.disconnected => 'Desconectado',
+      radio.RadioConnState.connected when others == 0 => 'Só você no canal',
+      radio.RadioConnState.connected => '${client.members.length} participantes online',
     };
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(color: color, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QueueStatusLine extends StatelessWidget {
-  const _QueueStatusLine({required this.client});
-
-  final radio.RadioClient client;
-
-  @override
-  Widget build(BuildContext context) {
-    final count = client.pendingPlaybackCount;
-
-    final (Color color, IconData icon, String text) =
-        client.recording
-            ? (
-                Colors.redAccent,
-                Icons.mic,
-                'Gravando... a escuta está pausada para não atrapalhar',
-              )
-            : count > 0
-                ? (
-                    Colors.greenAccent,
-                    Icons.graphic_eq,
-                    client.audioPlaying
-                        ? 'Tocando áudio · $count na fila'
-                        : '$count áudio(s) na fila',
-                  )
-                : (Colors.grey, Icons.queue_music, 'Fila de áudios vazia');
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 18),
+          Icon(Icons.circle, size: 6,
+              color: client.state == radio.RadioConnState.connected
+                  ? const Color(0xFF93B5A1)
+                  : Colors.white54),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(color: color, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecordingBanner extends StatelessWidget {
-  const _RecordingBanner({required this.client});
-
-  final radio.RadioClient client;
-
-  @override
-  Widget build(BuildContext context) {
-    final recording = client.members.where((m) => m.recording).toList();
-    final names = recording.map((m) {
-      if (m.userId == client.myUserId) return 'Você';
-      return m.username;
-    }).toList();
-    final label = names.isEmpty
-        ? 'Gravando...'
-        : recording.length > 1
-            ? '${names.take(2).join(' e ')} estão gravando...'
-            : '${names.first} está gravando...';
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.record_voice_over, color: Colors.orange, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                  color: Colors.orange, fontWeight: FontWeight.w700),
-            ),
-          ),
+          Expanded(child: Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 13))),
         ],
       ),
     );
