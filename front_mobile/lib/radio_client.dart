@@ -61,7 +61,6 @@ class RadioClient {
   RadioConnState get state => _state;
 
   final List<Member> members = [];
-  final Map<String, MemberLocation> locations = {};
 
   bool recording = false;
   bool get mutedWhileRecording => _muted;
@@ -147,7 +146,6 @@ class RadioClient {
     _setState(RadioConnState.disconnected);
     myUserId = null;
     members.clear();
-    locations.clear();
     await _stopRecording();
     await _clearPlayback();
     onNotice?.call(e.message);
@@ -211,12 +209,6 @@ class RadioClient {
         members
           ..clear()
           ..addAll(msg.members ?? const []);
-        locations
-          ..clear()
-          ..addAll({
-            for (final loc in msg.locations ?? const <MemberLocation>[])
-              loc.userId: loc,
-          });
         _cancelIncoming();
         _notify();
 
@@ -230,20 +222,8 @@ class RadioClient {
 
       case 'peer_left':
         members.removeWhere((m) => m.userId == msg.userId);
-        locations.remove(msg.userId);
         if (recording && msg.userId == myUserId) recording = false;
         _notify();
-
-      case 'location_update':
-        if (msg.userId != null && msg.lat != null && msg.lng != null) {
-          locations[msg.userId!] = MemberLocation(
-            userId: msg.userId!,
-            username: msg.username ?? '',
-            lat: msg.lat!,
-            lng: msg.lng!,
-          );
-          _notify();
-        }
 
       case 'recording_start':
         _setMemberRecording(msg.userId, true);
@@ -497,7 +477,6 @@ class RadioClient {
     }
     myUserId = null;
     members.clear();
-    locations.clear();
     // Os áudios que ainda não tocaram são descartados aqui de propósito: o
     // cursor faz o servidor reenviá-los, que é a única fonte da verdade.
     await _stopRecording();
@@ -507,11 +486,6 @@ class RadioClient {
   }
 
   // ---------------- Envio ----------------
-
-  void sendLocation(double lat, double lng) {
-    if (_state != RadioConnState.connected) return;
-    _send({'type': 'location', 'lat': lat, 'lng': lng});
-  }
 
   void _send(Map<String, dynamic> message) {
     try {

@@ -9,7 +9,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/lucas/radio-px-backend/internal/application/channel"
-	"github.com/lucas/radio-px-backend/internal/domain/location"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/auth/jwt"
 )
@@ -20,7 +19,6 @@ type Handler struct {
 	tokenManager *jwt.Manager
 	users        user.Repository
 	channels     *channel.Service
-	locations    location.Repository
 }
 
 func NewHandler(
@@ -29,7 +27,6 @@ func NewHandler(
 	tokenManager *jwt.Manager,
 	users user.Repository,
 	channels *channel.Service,
-	locations location.Repository,
 ) *Handler {
 	return &Handler{
 		hub:          hub,
@@ -37,7 +34,6 @@ func NewHandler(
 		tokenManager: tokenManager,
 		users:        users,
 		channels:     channels,
-		locations:    locations,
 	}
 }
 
@@ -93,15 +89,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room := h.hub.getOrCreateRoom(channelID, ch.Name)
-	client := newClient(room, u, conn, h.locations)
+	client := newClient(room, u, conn)
 
 	// Let the client know who is already here.
 	client.send(outboundMessage{
-		Type:      msgJoined,
-		Room:      &roomInfo{ID: room.id, Name: room.name},
-		Members:   room.members(),
-		Locations: room.allLocations(),
-		UserID:    client.user.ID,
+		Type:    msgJoined,
+		Room:    &roomInfo{ID: room.id, Name: room.name},
+		Members: room.members(),
+		UserID:  client.user.ID,
 	})
 
 	// Attach the member and stream the audio they still owe themselves before

@@ -19,6 +19,7 @@ var (
 type Claims struct {
 	UserID   uuid.UUID `json:"uid"`
 	Username string    `json:"username"`
+	Role     string    `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -36,13 +37,14 @@ func New(secret string, issuer string, accessTTL time.Duration) *Manager {
 	}
 }
 
-func (m *Manager) GenerateAccessToken(userID uuid.UUID, username string) (string, time.Time, error) {
+func (m *Manager) GenerateAccessToken(userID uuid.UUID, username, role string) (string, time.Time, error) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(m.accessTTL)
 
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			Issuer:    m.issuer,

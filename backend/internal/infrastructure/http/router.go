@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	authapp "github.com/lucas/radio-px-backend/internal/application/auth"
 	channelapp "github.com/lucas/radio-px-backend/internal/application/channel"
+	"github.com/lucas/radio-px-backend/internal/domain/location"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/auth/jwt"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/handlers"
@@ -19,6 +20,7 @@ type Dependencies struct {
 	Logger       *slog.Logger
 	TokenManager *jwt.Manager
 	Users        user.Repository
+	Locations    location.Repository
 	AuthService  *authapp.Service
 	Channels     *channelapp.Service
 	WSHandler    *ws.Handler
@@ -39,6 +41,8 @@ func NewRouter(deps Dependencies) *chi.Mux {
 
 	authHandler := handlers.NewAuthHandler(deps.AuthService)
 	channelHandler := handlers.NewChannelHandler(deps.Channels)
+	locationHandler := handlers.NewLocationHandler(deps.Locations)
+	usersHandler := handlers.NewUsersHandler(deps.Users)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/auth", func(r chi.Router) {
@@ -54,6 +58,19 @@ func NewRouter(deps Dependencies) *chi.Mux {
 			r.Post("/", channelHandler.Create)
 			r.Get("/{channelID}", channelHandler.Get)
 			r.Post("/{channelID}/join", channelHandler.Join)
+		})
+
+		// Relatório de posição sempre ativo (beacon Android), inclusive fora
+		// de canal. Só o admin lê as posições reportadas.
+		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Post("/locations", locationHandler.Report)
+
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(httpmw.Authenticate(deps.TokenManager, deps.Users), httpmw.RequireAdmin)
+			r.Get("/locations", locationHandler.Latest)
+			r.Get("/locations/history", locationHandler.Log)
+			r.Get("/users", usersHandler.List)
+			r.Patch("/users/{userID}", usersHandler.Update)
+			r.Delete("/users/{userID}", usersHandler.Delete)
 		})
 	})
 

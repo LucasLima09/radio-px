@@ -51,12 +51,13 @@ func main() {
 	channelService := channelapp.NewService(channelRepo, userRepo)
 
 	hub := ws.NewHub(logger, cfg.ClipTTL, cfg.ClipMax, cfg.ClipMaxBytes, cfg.ClipMaxQueueBytes)
-	wsHandler := ws.NewHandler(hub, logger, tokenManager, userRepo, channelService, locationRepo)
+	wsHandler := ws.NewHandler(hub, logger, tokenManager, userRepo, channelService)
 
 	router := apphttp.NewRouter(apphttp.Dependencies{
 		Logger:       logger,
 		TokenManager: tokenManager,
 		Users:        userRepo,
+		Locations:    locationRepo,
 		AuthService:  authService,
 		Channels:     channelService,
 		WSHandler:    wsHandler,

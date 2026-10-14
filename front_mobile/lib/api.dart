@@ -111,6 +111,12 @@ class ApiClient {
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Reporta a posição atual. Chamado pelo beacon em segundo plano; a resposta
+  /// é 204, sem corpo.
+  Future<void> sendLocation(double lat, double lng) async {
+    await _authed('POST', '/api/v1/locations', {'lat': lat, 'lng': lng});
+  }
+
   static const _timeout = Duration(seconds: 15);
 
   Future<dynamic> _authed(String method, String path, [Map<String, dynamic>? body]) async {
