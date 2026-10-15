@@ -5,20 +5,32 @@ import 'leaflet/dist/leaflet.css';
 import { Api, ApiError, type LocationReport, type PublicUser } from './api';
 import { DemoApi } from './demo';
 import { isLiveLocation } from './location-status';
+import { useTheme } from './theme';
 
-const DEFAULT_SERVER = 'http://localhost:8080';
+const DEV_SERVER = 'http://localhost:8080';
 const SERVER_KEY = 'radio_px_admin_server';
 const POLL_INTERVAL_MS = 5000;
+
+// Em desenvolvimento (Vite em :5173) aponta para o backend local.
+// Servido pelo backend Go em /admin, usa a mesma origem.
+const IS_VITE_DEV =
+  typeof window !== 'undefined' && window.location.port === '5173';
+const SERVER_PLACEHOLDER = IS_VITE_DEV
+  ? DEV_SERVER
+  : typeof window !== 'undefined'
+    ? window.location.origin
+    : DEV_SERVER;
+
+function initialServer(): string {
+  if (!IS_VITE_DEV) return '';
+  return localStorage.getItem(SERVER_KEY) ?? DEV_SERVER;
+}
 
 type Page = 'overview' | 'map' | 'users' | 'log';
 
 export default function App() {
-  const [server, setServer] = useState(
-    () => localStorage.getItem(SERVER_KEY) ?? DEFAULT_SERVER,
-  );
-  const [api, setApi] = useState(
-    () => new Api(localStorage.getItem(SERVER_KEY) ?? DEFAULT_SERVER),
-  );
+  const [server, setServer] = useState(initialServer);
+  const [api, setApi] = useState(() => new Api(initialServer()));
   const [loggedIn, setLoggedIn] = useState<boolean>(api.hasSession);
   const [page, setPage] = useState<Page>('overview');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +39,7 @@ export default function App() {
   const handleLogin = async (username: string, password: string) => {
     setBusy(true);
     setError(null);
-    const normalized = server.trim().replace(/\/+$/, '') || DEFAULT_SERVER;
+    const normalized = server.trim().replace(/\/+$/, '');
     try {
       const next = new Api(normalized);
       await next.login(username, password);
@@ -104,7 +116,7 @@ function LoginView({
           <input
             value={server}
             onChange={(e) => onServer(e.target.value)}
-            placeholder={DEFAULT_SERVER}
+            placeholder={SERVER_PLACEHOLDER}
           />
         </label>
         <label>
@@ -151,6 +163,7 @@ function Dashboard({
   onUnauthorized: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { theme, toggle } = useTheme();
   const items: { id: Page; label: string; detail: string; icon: string }[] = [
     { id: 'overview', label: 'Visão geral', detail: 'Resumo da operação', icon: '◫' },
     { id: 'map', label: 'Mapa ao vivo', detail: 'Localização dos motoristas', icon: '◎' },
@@ -168,11 +181,11 @@ function Dashboard({
           {items.map((item) => <button key={item.id} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => { onPage(item.id); setMenuOpen(false); }}><span className="nav-icon" aria-hidden="true">{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><span className="nav-arrow" aria-hidden="true">›</span></button>)}
         </nav>
         <div className="sidebar-note"><span className="status-dot" /> Monitoramento de posições<p>Acompanhe a operação e gerencie os acessos em um só lugar.</p></div>
-        <div className="sidebar-footer"><span className="avatar">{api.user?.username?.[0]?.toUpperCase() ?? 'A'}</span><div className="account"><strong>{api.user?.username ?? 'admin'}</strong><small>Administrador</small></div><button onClick={onLogout} aria-label="Sair da conta">Sair</button></div>
+        <div className="sidebar-footer"><span className="avatar">{api.user?.username?.[0]?.toUpperCase() ?? 'A'}</span><div className="account"><strong>{api.user?.username ?? 'admin'}</strong><small>Administrador</small></div><button className="danger" onClick={onLogout} aria-label="Sair da conta">Sair</button></div>
       </aside>
       <main className="main">
         {api instanceof DemoApi && <div className="demo-banner">Modo demonstração · Dados fictícios. Alterações valem apenas nesta sessão.</div>}
-        <header className="topbar"><button className="menu-toggle" aria-label="Abrir navegação" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>☰</button><span>Administração <span className="breadcrumb-divider">/</span> <strong>{selected.label}</strong></span><span className="workspace-badge">RADIO PX · ADMIN</span></header>
+        <header className="topbar"><button className="menu-toggle" aria-label="Abrir navegação" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>☰</button><span>Administração <span className="breadcrumb-divider">/</span> <strong>{selected.label}</strong></span><div className="topbar-actions"><span className="workspace-badge">RADIO PX · ADMIN</span><button className="theme-toggle" onClick={toggle} aria-label={theme === 'dark' ? 'Ativar modo claro' : 'Ativar modo escuro'} title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? '☀' : '☾'}</button></div></header>
         {page === 'overview' && <OverviewPage api={api} onUnauthorized={onUnauthorized} onPage={onPage} />}
         {page === 'map' && <MapPage api={api} onUnauthorized={onUnauthorized} />}
         {page === 'users' && <UsersPage api={api} onUnauthorized={onUnauthorized} />}
