@@ -46,6 +46,7 @@ type Public struct {
 	IsPrivate bool      `json:"isPrivate"`
 	OwnerID   uuid.UUID `json:"ownerId"`
 	Members   int       `json:"members"`
+	Online    int       `json:"online"`
 }
 
 func (c *Channel) Public(memberCount int) Public {

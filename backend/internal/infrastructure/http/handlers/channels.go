@@ -6,15 +6,36 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	channelapp "github.com/lucas/radio-px-backend/internal/application/channel"
+	domainchannel "github.com/lucas/radio-px-backend/internal/domain/channel"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/middleware"
 )
 
 type ChannelHandler struct {
 	service *channelapp.Service
+	online  OnlineCounter
 }
 
-func NewChannelHandler(service *channelapp.Service) *ChannelHandler {
-	return &ChannelHandler{service: service}
+// OnlineCounter exposes how many users are currently connected to each channel.
+// Implemented by the WebSocket hub; the channel service itself does not track
+// live presence.
+type OnlineCounter interface {
+	ChannelOnline() map[uuid.UUID]int
+}
+
+func NewChannelHandler(service *channelapp.Service, online OnlineCounter) *ChannelHandler {
+	return &ChannelHandler{service: service, online: online}
+}
+
+// withOnline fills the live online count for each channel. Channels with no
+// active room stay at 0.
+func (h *ChannelHandler) withOnline(channels []domainchannel.Public) {
+	if h.online == nil {
+		return
+	}
+	counts := h.online.ChannelOnline()
+	for i := range channels {
+		channels[i].Online = counts[channels[i].ID]
+	}
 }
 
 type createChannelRequest struct {
@@ -48,7 +69,9 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.service.List(r.Context()))
+	channels := h.service.List(r.Context())
+	h.withOnline(channels)
+	writeJSON(w, http.StatusOK, channels)
 }
 
 func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +85,9 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeDomainError(w, err)
 		return
+	}
+	if h.online != nil {
+		ch.Online = h.online.ChannelOnline()[ch.ID]
 	}
 
 	writeJSON(w, http.StatusOK, ch)
@@ -84,6 +110,9 @@ func (h *ChannelHandler) Join(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeDomainError(w, err)
 		return
+	}
+	if h.online != nil {
+		ch.Online = h.online.ChannelOnline()[ch.ID]
 	}
 
 	writeJSON(w, http.StatusOK, ch)
