@@ -24,6 +24,7 @@ type Channel struct {
 	Name      string    `json:"name"`
 	Owner     string    `json:"owner"`
 	Members   int       `json:"members"`
+	Online    int       `json:"online"`
 	IsPrivate bool      `json:"isPrivate"`
 	CreatedAt time.Time `json:"createdAt"`
 }

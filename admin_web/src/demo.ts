@@ -1,4 +1,4 @@
-import { Api, type LocationReport, type PublicUser } from './api';
+import { Api, type AdminChannel, type LocationReport, type Page, type PublicUser } from './api';
 
 export class DemoApi extends Api {
   private users: PublicUser[] = [
@@ -8,6 +8,11 @@ export class DemoApi extends Api {
     { id: 'demo-3', username: 'Pedro Santos', role: 'user', createdAt: '2026-09-20T12:00:00Z' },
   ];
   private locations: LocationReport[];
+  private channels: AdminChannel[] = [
+    { id: 'chan-1', name: 'Frota Centro', owner: 'Admin Demo', online: 3, members: 8, isPrivate: false, createdAt: '2026-09-05T12:00:00Z' },
+    { id: 'chan-2', name: 'Entrega Norte', owner: 'Carlos Silva', online: 1, members: 4, isPrivate: false, createdAt: '2026-09-08T12:00:00Z' },
+    { id: 'chan-3', name: 'Operação VIP', owner: 'Ana Souza', online: 0, members: 2, isPrivate: true, createdAt: '2026-09-11T12:00:00Z' },
+  ];
 
   constructor() {
     super('demo');
@@ -42,6 +47,24 @@ export class DemoApi extends Api {
     if (id === this.user?.id) throw new Error('Você não pode excluir sua própria conta');
     this.users = this.users.filter((u) => u.id !== id);
     this.locations = this.locations.filter((r) => r.userId !== id);
+  }
+  override async listChannels(search = '', page = 1): Promise<Page<AdminChannel>> {
+    const pageSize = 20;
+    const term = search.trim().toLowerCase();
+    const filtered = this.channels.filter((c) => !term || c.name.toLowerCase().includes(term));
+    const start = (page - 1) * pageSize;
+    return {
+      items: filtered.slice(start, start + pageSize).map((c) => ({ ...c })),
+      total: filtered.length,
+      page,
+      pageSize,
+    };
+  }
+  override async deleteChannel(id: string) {
+    const channel = this.channels.find((c) => c.id === id);
+    if (!channel) throw new Error('Canal não encontrado');
+    if (channel.online > 0) throw new Error('O canal está em uso. Aguarde os participantes saírem.');
+    this.channels = this.channels.filter((c) => c.id !== id);
   }
   override async logout() { this.user = null; }
 }

@@ -20,6 +20,23 @@ export interface LocationReport {
   reportedAt: string;
 }
 
+export interface AdminChannel {
+  id: string;
+  name: string;
+  owner: string;
+  online: number;
+  members?: number;
+  isPrivate: boolean;
+  createdAt?: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -122,6 +139,17 @@ export class Api {
 
   async deleteUser(id: string): Promise<void> {
     await this.request(`/api/v1/admin/users/${id}`, { method: 'DELETE' });
+  }
+
+  async listChannels(search = '', page = 1): Promise<Page<AdminChannel>> {
+    const params = new URLSearchParams();
+    if (search) params.set('q', search);
+    params.set('page', String(page));
+    return this.request(`/api/v1/admin/channels?${params.toString()}`);
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    await this.request(`/api/v1/admin/channels/${id}`, { method: 'DELETE' });
   }
 
   async logout(): Promise<void> {

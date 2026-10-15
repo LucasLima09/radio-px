@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-import { Api, ApiError, type LocationReport, type PublicUser } from './api';
+import { Api, ApiError, type AdminChannel, type LocationReport, type Page as ApiPage, type PublicUser } from './api';
 import { DemoApi } from './demo';
 import { isLiveLocation } from './location-status';
 import { useTheme } from './theme';
@@ -26,7 +26,7 @@ function initialServer(): string {
   return localStorage.getItem(SERVER_KEY) ?? DEV_SERVER;
 }
 
-type Page = 'overview' | 'map' | 'users' | 'log';
+type Page = 'overview' | 'map' | 'users' | 'channels' | 'log';
 
 export default function App() {
   const [server, setServer] = useState(initialServer);
@@ -168,6 +168,7 @@ function Dashboard({
     { id: 'overview', label: 'Visão geral', detail: 'Resumo da operação', icon: '◫' },
     { id: 'map', label: 'Mapa ao vivo', detail: 'Localização dos motoristas', icon: '◎' },
     { id: 'users', label: 'Usuários', detail: 'Contas e permissões', icon: '♙' },
+    { id: 'channels', label: 'Canais', detail: 'Canais e pessoas online', icon: '#' },
     { id: 'log', label: 'Histórico de posições', detail: 'Registros e consultas', icon: '≡' },
   ];
   const selected = items.find((item) => item.id === page)!;
@@ -189,6 +190,7 @@ function Dashboard({
         {page === 'overview' && <OverviewPage api={api} onUnauthorized={onUnauthorized} onPage={onPage} />}
         {page === 'map' && <MapPage api={api} onUnauthorized={onUnauthorized} />}
         {page === 'users' && <UsersPage api={api} onUnauthorized={onUnauthorized} />}
+        {page === 'channels' && <ChannelsPage api={api} onUnauthorized={onUnauthorized} />}
         {page === 'log' && <LogPage api={api} onUnauthorized={onUnauthorized} />}
       </main>
     </div>
@@ -568,6 +570,189 @@ function UsersPage({
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function ChannelsPage({
+  api,
+  onUnauthorized,
+}: {
+  api: Api;
+  onUnauthorized: () => void;
+}) {
+  const [data, setData] = useState<ApiPage<AdminChannel> | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await api.listChannels(search, page);
+      setData(result as ApiPage<AdminChannel>);
+      setError(null);
+      setLoaded(true);
+    } catch (e) {
+      if (unauthorizedMessage(e)) {
+        onUnauthorized();
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Falha ao listar canais');
+    }
+  }, [api, search, page, onUnauthorized]);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const submitSearch = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setPage(1);
+    setSearch(searchInput.trim());
+  };
+
+  const remove = async (channel: AdminChannel) => {
+    if (
+      !window.confirm(
+        `Excluir o canal "${channel.name}"? Esta ação não pode ser desfeita.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(channel.id);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.deleteChannel(channel.id);
+      setSuccess(`Canal "${channel.name}" excluído.`);
+      await load();
+    } catch (e) {
+      if (unauthorizedMessage(e)) {
+        onUnauthorized();
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Falha ao excluir o canal');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 20;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const channels = data?.items ?? [];
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2>Canais</h2>
+        <span className="meta">
+          {total} canal(is) · atualiza a cada {POLL_INTERVAL_MS / 1000}s
+          {!loaded && ' · carregando...'}
+        </span>
+        {error && <span className="error">{error}</span>}
+        {success && <span className="success">{success}</span>}
+        <button className="ghost" onClick={load}>
+          Atualizar
+        </button>
+      </div>
+
+      <form className="filters" onSubmit={submitSearch}>
+        <label>
+          Buscar
+          <input
+            value={searchInput}
+            placeholder="Nome do canal"
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+        </label>
+        <button className="primary" type="submit">
+          Filtrar
+        </button>
+      </form>
+
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Canal</th>
+              <th>Dono</th>
+              <th>Tipo</th>
+              <th>Online agora</th>
+              <th>Criado em</th>
+              <th className="actions-col">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {channels.map((c) => (
+              <tr key={c.id}>
+                <td className="cell-user">{c.name}</td>
+                <td>{c.owner || '—'}</td>
+                <td className="muted">
+                  {c.isPrivate ? 'Privado' : 'Público'}
+                </td>
+                <td>
+                  <span className={`badge ${c.online > 0 ? 'badge-live' : 'badge-off'}`}>
+                    {c.online > 0 ? `${c.online} online` : '0 online'}
+                  </span>
+                </td>
+                <td className="muted">
+                  {c.createdAt
+                    ? new Date(c.createdAt).toLocaleString()
+                    : '—'}
+                </td>
+                <td className="actions-col">
+                  <button
+                    className="danger"
+                    disabled={deletingId != null || c.online > 0}
+                    title={
+                      c.online > 0
+                        ? 'Há pessoas conectadas neste canal'
+                        : 'Excluir canal'
+                    }
+                    onClick={() => remove(c)}
+                  >
+                    {deletingId === c.id ? 'Excluindo...' : 'Excluir'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {channels.length === 0 && !error && (
+              <tr>
+                <td colSpan={6} className="muted center">
+                  {loaded ? 'Nenhum canal encontrado.' : 'Carregando...'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pagination">
+        <button
+          className="ghost"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          ‹ Anterior
+        </button>
+        <span className="muted">
+          Página {page} de {totalPages}
+        </span>
+        <button
+          className="ghost"
+          disabled={page >= totalPages}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Próxima ›
+        </button>
       </div>
     </div>
   );

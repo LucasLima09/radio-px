@@ -66,6 +66,18 @@ func (r *Room) members() []memberInfo {
 	return out
 }
 
+// onlineUsers counts distinct users currently connected to the room. A single
+// account connected from multiple devices counts once.
+func (r *Room) onlineUsers() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := make(map[uuid.UUID]struct{}, len(r.clients))
+	for c := range r.clients {
+		seen[c.user.ID] = struct{}{}
+	}
+	return len(seen)
+}
+
 func (r *Room) broadcast(m outboundMessage) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

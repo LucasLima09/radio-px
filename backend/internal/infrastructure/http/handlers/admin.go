@@ -84,6 +84,11 @@ func (h *AdminHandler) Channels(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	if online := h.ws.ChannelOnline(); len(online) > 0 {
+		for i := range result.Items {
+			result.Items[i].Online = online[result.Items[i].ID]
+		}
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
