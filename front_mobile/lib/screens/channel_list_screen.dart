@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -26,30 +28,48 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   bool _creating = false;
   int _tab = 0;
   late PublicUser _user;
+  Timer? _refreshTimer;
+
+  static const _refreshInterval = Duration(seconds: 5);
 
   @override
   void initState() {
     super.initState();
     _user = widget.user;
     _load();
+    // Atualiza a contagem de pessoas online periodicamente. Sem isso, a lista
+    // fica com o valor de quando foi aberta — por exemplo, ainda mostrando a
+    // própria pessoa logo depois de sair de um canal.
+    _refreshTimer = Timer.periodic(
+      _refreshInterval,
+      (_) => _load(silent: true),
+    );
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _error = null;
+      });
+    }
     try {
       final channels = await widget.api.listChannels();
       if (!mounted) return;
       setState(() => _channels = channels);
     } on ApiException catch (e) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       setState(() {
         _channels = const [];
         _error = e.message;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       setState(() {
         _channels = const [];
         _error = 'Falha de rede ou servidor inacessível: $e';
@@ -171,7 +191,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         index: _tab,
         children: [
           RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: () => _load(),
             child: channels == null
                 ? const Center(child: CircularProgressIndicator())
                 : channels.isEmpty
@@ -213,7 +233,26 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                           child: const Icon(Icons.tag, color: pxAccent, size: 20),
                         ),
                         title: Text(ch.name),
-                        subtitle: Text('${ch.members} membro(s)'),
+                        subtitle: Row(
+                          children: [
+                            if (ch.online > 0) ...[
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF3DD68C),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(
+                              ch.online == 0
+                                  ? 'Ninguém online agora'
+                                  : '${ch.online} online agora',
+                            ),
+                          ],
+                        ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _openChannel(ch),
                       );

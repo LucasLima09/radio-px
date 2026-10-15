@@ -560,7 +560,13 @@ class RadioClient {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     try {
-      _ws?.sink.close();
+      // Avisa o servidor que saímos para ele remover a presença na hora, sem
+      // esperar o fechamento do socket — assim a contagem de online cai assim
+      // que a tela do canal é fechada.
+      if (_state == RadioConnState.connected) {
+        _send({'type': 'leave'});
+      }
+      await _ws?.sink.close();
     } catch (_) {}
     await _sub?.cancel();
     await _playerSub?.cancel();
