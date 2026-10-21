@@ -53,6 +53,39 @@ func (r *memoryUserRepo) FindByID(_ context.Context, id uuid.UUID) (*user.User, 
 	return u, nil
 }
 
+func (r *memoryUserRepo) List(_ context.Context) ([]*user.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*user.User, 0, len(r.byID))
+	for _, u := range r.byID {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func (r *memoryUserRepo) Update(_ context.Context, u *user.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.byID[u.ID]; !ok {
+		return user.ErrNotFound
+	}
+	r.byID[u.ID] = u
+	r.byName[u.Username] = u
+	return nil
+}
+
+func (r *memoryUserRepo) Delete(_ context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.byID[id]
+	if !ok {
+		return user.ErrNotFound
+	}
+	delete(r.byID, id)
+	delete(r.byName, u.Username)
+	return nil
+}
+
 type memoryTokenRepo struct {
 	mu     sync.Mutex
 	tokens map[string]*user.RefreshToken

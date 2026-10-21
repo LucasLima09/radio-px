@@ -59,3 +59,18 @@ func writeUnauthorized(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 }
+
+// RequireAdmin rejeita quem não tem role admin. Deve ser usado DEPOIS de
+// Authenticate, que carrega o usuário no contexto.
+func RequireRoleAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, ok := UserFromContext(r.Context())
+		if !ok || u.Role != user.RoleAdmin {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

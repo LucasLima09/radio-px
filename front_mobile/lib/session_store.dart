@@ -27,4 +27,17 @@ class SessionStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_key);
   }
+
+  static Future<void> updateUser(PublicUser user) async {
+    final session = await load();
+    if (session == null || session.user.id != user.id) return;
+    await save(
+      AuthSession(
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+        user: user,
+      ),
+    );
+  }
 }

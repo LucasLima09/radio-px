@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../background/beacon_controller.dart';
+import '../ui.dart';
 import '../config.dart';
-import '../models.dart';
 import '../session_store.dart';
 import 'channel_list_screen.dart';
 import 'register_screen.dart';
@@ -20,7 +22,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passCtrl = TextEditingController();
 
   bool _loading = false;
-  PublicUser? _savedUser;
+  String? _error;
+  bool _restoring = true;
 
   @override
   void initState() {
@@ -29,11 +32,16 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _restore() async {
-    final session = await SessionStore.load();
-    if (!mounted) return;
-    _serverCtrl.text = await AppConfig.loadServerUrl();
-    if (session != null) {
-      setState(() => _savedUser = session.user);
+    try {
+      final server = await AppConfig.loadServerUrl();
+      final saved = await SessionStore.load();
+      if (!mounted) return;
+      _serverCtrl.text = server;
+      _userCtrl.text = saved?.user.username ?? '';
+    } catch (error) {
+      if (mounted) _error = 'Não foi possível carregar as configurações: $error';
+    } finally {
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -57,16 +65,27 @@ class _LoginScreenState extends State<LoginScreen> {
     return url;
   }
 
-  Future<void> _login({bool asSaved = false}) async {
-    setState(() => _loading = true);
+  Future<void> _login() async {
+    if (_loading || _restoring) return;
+    if (_userCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
+      _showError('Preencha o usuário e a senha.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
     try {
       final serverUrl = _normalizedServerUrl();
       await AppConfig.saveServerUrl(serverUrl);
       final api = ApiClient(serverUrl);
-      final session = asSaved
-          ? (await SessionStore.load())!
-          : await api.login(_userCtrl.text.trim(), _passCtrl.text);
+      final session = await api.login(_userCtrl.text.trim(), _passCtrl.text);
       api.setSession(session);
+      final beaconOk = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? await BeaconController.start()
+          : true;
+      if (!beaconOk) {
+        _showError(
+            'Sem permissão de localização: o app não enviará sua posição em '
+            'segundo plano.');
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -75,8 +94,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on ApiException catch (e) {
       _showError(e.message);
-    } catch (_) {
-      _showError('Não foi possível conectar ao servidor');
+    } catch (error) {
+      _showError('Não foi possível entrar: $error');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -93,8 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    setState(() => _error = message);
   }
 
   @override
@@ -110,36 +128,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.radio, size: 72),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Radio PX',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const Text(
-                    'Comunicação PTT',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white54),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: RadioMark(),
                   ),
                   const SizedBox(height: 32),
-                  TextField(
-                    controller: _serverCtrl,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: 'Servidor',
-                      hintText: 'http://10.0.2.2:8080',
-                      prefixIcon: Icon(Icons.dns_outlined),
-                      border: OutlineInputBorder(),
-                    ),
+                  const PageHeading(
+                    title: 'Entre no Radio PX',
+                    subtitle: 'Faça login, escolha um canal e comece a falar.',
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 36),
                   TextField(
                     controller: _userCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Usuário',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -149,42 +151,48 @@ class _LoginScreenState extends State<LoginScreen> {
                     onSubmitted: (_) => _login(),
                     decoration: const InputDecoration(
                       labelText: 'Senha',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: _loading ? null : _login,
-                    icon: _loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.login),
-                    label: const Text('Entrar'),
+                  if (_error != null) Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE79B94), fontSize: 13)),
+                  ),
+                  FilledButton(
+                    onPressed: _loading || _restoring ? null : _login,
+                    child: Text(_loading ? 'Entrando...' : 'Entrar'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
+                  TextButton(
                     onPressed: _loading ? null : _openRegister,
-                    icon: const Icon(Icons.person_add_alt),
-                    label: const Text('Criar conta'),
-                    style: OutlinedButton.styleFrom(
+                    child: const Text('Criar conta'),
+                    style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
-                  if (_savedUser != null) ...[
-                    const SizedBox(height: 16),
-                    TextButton.icon(
-                      onPressed: _loading ? null : () => _login(asSaved: true),
-                      icon: const Icon(Icons.play_arrow),
-                      label: Text('Continuar como ${_savedUser!.username}'),
+                  const SizedBox(height: 12),
+                  Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(bottom: 12),
+                      title: const Text('Configurar servidor',
+                          style: TextStyle(color: pxMuted, fontSize: 13)),
+                      children: [
+                  TextField(
+                    controller: _serverCtrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'Servidor',
+                      hintText: 'http://10.0.2.2:8080',
                     ),
-                  ],
+                  ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),

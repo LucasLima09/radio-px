@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
@@ -22,19 +23,23 @@ class ApiClient {
 
   String? _accessToken;
   String? _refreshToken;
+  int _accessTokenExpiresAt = 0;
 
   String? get accessToken => _accessToken;
 
   void setSession(AuthSession session) {
     _accessToken = session.accessToken;
     _refreshToken = session.refreshToken;
+    _accessTokenExpiresAt = session.expiresAt;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
   Future<AuthSession> login(String username, String password) async {
-    final res = await _request(
-        'POST', '/api/v1/auth/login', {'username': username, 'password': password});
+    final res = await _request('POST', '/api/v1/auth/login', {
+      'username': username,
+      'password': password,
+    });
     final session = AuthSession.fromJson(_decode(res));
     setSession(session);
     await SessionStore.save(session);
@@ -42,8 +47,10 @@ class ApiClient {
   }
 
   Future<PublicUser> register(String username, String password) async {
-    final res = await _request(
-        'POST', '/api/v1/auth/register', {'username': username, 'password': password});
+    final res = await _request('POST', '/api/v1/auth/register', {
+      'username': username,
+      'password': password,
+    });
     return PublicUser.fromJson(_decode(res));
   }
 
@@ -52,14 +59,19 @@ class ApiClient {
     if (rt == null) return false;
     http.Response res;
     try {
-      res = await http.post(_uri('/api/v1/auth/refresh'),
-          headers: _headers(false),
-          body: jsonEncode({'refreshToken': rt})).timeout(_timeout);
+      res = await http
+          .post(
+            _uri('/api/v1/auth/refresh'),
+            headers: _headers(false),
+            body: jsonEncode({'refreshToken': rt}),
+          )
+          .timeout(_timeout);
     } catch (_) {
       return false;
     }
     if (res.statusCode != 200) {
       _accessToken = null;
+      _accessTokenExpiresAt = 0;
       return false;
     }
     final session = AuthSession.fromJson(_decode(res));
@@ -68,10 +80,26 @@ class ApiClient {
     return true;
   }
 
+  /// Margem para não abrir o WebSocket com um token que expira no meio do
+  /// handshake.
+  static const _tokenExpiryMargin = Duration(seconds: 30);
+
+  /// Devolve um token de acesso válido, renovando quando necessário.
+  ///
+  /// A renovação é decidida por tempo de vida, e não por resposta 401, porque o
+  /// WebSocket não tem como reagir a um 401 no handshake: sem isso, uma
+  /// reconexão automática depois de o token expirar repetiria indefinidamente o
+  /// mesmo token recusado.
   Future<String> ensureAccessToken() async {
-    if (_accessToken != null) return _accessToken!;
+    if (_accessToken != null && !_isExpired()) return _accessToken!;
     if (await refresh()) return _accessToken!;
     throw ApiException(401, 'Sessão expirada');
+  }
+
+  bool _isExpired() {
+    if (_accessTokenExpiresAt <= 0) return false;
+    return _accessTokenExpiresAt - _tokenExpiryMargin.inSeconds <=
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
   }
 
   Future<List<Channel>> listChannels() async {
@@ -81,9 +109,31 @@ class ApiClient {
         .toList();
   }
 
+  Future<PublicUser> getProfile() async {
+    final data = await _authed('GET', '/api/v1/profile');
+    final user = PublicUser.fromJson(data as Map<String, dynamic>);
+    await SessionStore.updateUser(user);
+    return user;
+  }
+
+  Future<PublicUser> updateProfile({
+    required String username,
+    String? avatar,
+  }) async {
+    final data = await _authed('PATCH', '/api/v1/profile', {
+      'username': username,
+      'avatar': ?avatar,
+    });
+    final user = PublicUser.fromJson(data as Map<String, dynamic>);
+    await SessionStore.updateUser(user);
+    return user;
+  }
+
   Future<Channel> createChannel(String name) async {
-    final data =
-        await _authed('POST', '/api/v1/channels', {'name': name, 'isPrivate': false});
+    final data = await _authed('POST', '/api/v1/channels', {
+      'name': name,
+      'isPrivate': false,
+    });
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 
@@ -92,9 +142,19 @@ class ApiClient {
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Reporta a posição atual. Chamado pelo beacon em segundo plano; a resposta
+  /// é 204, sem corpo.
+  Future<void> sendLocation(double lat, double lng) async {
+    await _authed('POST', '/api/v1/locations', {'lat': lat, 'lng': lng});
+  }
+
   static const _timeout = Duration(seconds: 15);
 
-  Future<dynamic> _authed(String method, String path, [Map<String, dynamic>? body]) async {
+  Future<dynamic> _authed(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async {
     var res = await _request(method, path, body, true);
     if (res.statusCode == 401 && _accessToken != null && await refresh()) {
       res = await _request(method, path, body, true);
@@ -102,20 +162,30 @@ class ApiClient {
     return _decode(res);
   }
 
-  Future<http.Response> _request(String method, String path,
-      [Map<String, dynamic>? body, bool authed = false]) async {
+  Future<http.Response> _request(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+    bool authed = false,
+  ]) async {
     final req = http.Request(method, _uri(path));
     req.headers.addAll(_headers(authed));
     if (body != null) req.body = jsonEncode(body);
-    final streamed = await req.send().timeout(_timeout);
-    return http.Response.fromStream(streamed);
+    try {
+      final streamed = await req.send().timeout(_timeout);
+      return await http.Response.fromStream(streamed).timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException(0, 'O servidor $baseUrl não respondeu em 15 segundos. Verifique a conexão e o endereço.');
+    } on http.ClientException catch (error) {
+      throw ApiException(0, 'Falha ao acessar $baseUrl: ${error.message}');
+    }
   }
 
   Map<String, String> _headers(bool authed) => {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': '1',
-        if (authed && _accessToken != null) 'Authorization': 'Bearer $_accessToken',
-      };
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': '1',
+    if (authed && _accessToken != null) 'Authorization': 'Bearer $_accessToken',
+  };
 
   dynamic _decode(http.Response res) {
     if (res.statusCode >= 400) throw _errorFrom(res);
@@ -125,7 +195,9 @@ class ApiClient {
       return jsonDecode(text);
     } catch (_) {
       throw ApiException(
-          res.statusCode, 'Resposta inválida do servidor (não é JSON)');
+        res.statusCode,
+        'Resposta inválida do servidor (não é JSON)',
+      );
     }
   }
 

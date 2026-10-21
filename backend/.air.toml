@@ -7,7 +7,7 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -o ./tmp/main ./cmd/server"
   bin = "./tmp/main"
-  include_ext = ["go", "toml", "sql", "env", "mod", "sum"]
+  include_ext = ["go", "toml", "sql", "env", "mod", "sum", "js", "css", "html"]
   exclude_dir = ["tmp"]
   exclude_regex = ["_test\\.go$"]
   delay = 800
