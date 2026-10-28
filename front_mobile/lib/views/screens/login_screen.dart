@@ -5,7 +5,6 @@ import '../../di.dart';
 import '../../routes.dart';
 import '../../theme/app_colors.dart';
 import '../widgets/page_heading.dart';
-import '../widgets/radio_mark.dart';
 
 /// Tela de entrada: servidor, usuário e senha.
 class LoginScreen extends StatefulWidget {
@@ -98,9 +97,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: RadioMark(),
+                      Center(
+                        child: Image.asset(
+                          'assets/image/logoktm.png',
+                          height: 80,
+                        ),
                       ),
                       const SizedBox(height: 32),
                       const PageHeading(
@@ -156,9 +157,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       Theme(
                         data: Theme.of(context)
                             .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          childrenPadding: const EdgeInsets.only(bottom: 12),
+                        child:                         ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                          childrenPadding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                           title: const Text(
                             'Configurar servidor',
                             style: TextStyle(color: pxMuted, fontSize: 13),

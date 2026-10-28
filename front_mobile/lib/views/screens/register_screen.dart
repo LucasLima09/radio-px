@@ -4,7 +4,6 @@ import '../../controllers/auth_controller.dart';
 import '../../di.dart';
 import '../../routes.dart';
 import '../widgets/page_heading.dart';
-import '../widgets/radio_mark.dart';
 
 /// Tela de criação de conta.
 class RegisterScreen extends StatefulWidget {
@@ -89,9 +88,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: RadioMark(),
+                      Center(
+                        child: Image.asset(
+                          'assets/image/logoktm.png',
+                          height: 80,
+                        ),
                       ),
                       const SizedBox(height: 32),
                       const PageHeading(

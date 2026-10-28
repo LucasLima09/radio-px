@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 
 import '../../controllers/room_controller.dart';
 import '../../di.dart';
@@ -16,7 +14,7 @@ import '../widgets/playback_status.dart';
 import '../widgets/record_button.dart';
 import '../widgets/room_status.dart';
 
-/// Tela da sala: quem está no canal, o mapa e o botão de falar.
+/// Tela da sala: quem está no canal e o botão de falar.
 class RoomScreen extends StatefulWidget {
   const RoomScreen({
     super.key,
@@ -32,11 +30,7 @@ class RoomScreen extends StatefulWidget {
 }
 
 class _RoomScreenState extends State<RoomScreen> {
-  final MapController _mapController = MapController();
-
   RoomController? _controller;
-  bool _mapReady = false;
-  Set<String> _lastFitIds = {};
   int _lastNoticeId = 0;
 
   @override
@@ -56,115 +50,6 @@ class _RoomScreenState extends State<RoomScreen> {
   void dispose() {
     _controller?.dispose();
     super.dispose();
-  }
-
-  // ---------------- Mapa ----------------
-
-  void _scheduleFitMap() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _fitMapIfNeeded();
-    });
-  }
-
-  /// Enquadra a câmera nos participantes conhecidos. Só refaz quando a lista
-  /// de posições muda, para não brigar com o gesto do usuário.
-  void _fitMapIfNeeded() {
-    final controller = _controller!;
-    if (!controller.showMap || !_mapReady) return;
-    final locations = controller.locations;
-    final ids = locations.keys.toSet();
-    if (ids.isEmpty || ids == _lastFitIds) return;
-    _lastFitIds = ids;
-    final coords = locations.values
-        .map((l) => LatLng(l.lat, l.lng))
-        .toList();
-    if (coords.isEmpty) return;
-    try {
-      if (coords.length == 1) {
-        _mapController.move(coords.first, 16);
-      } else {
-        _mapController.fitCamera(CameraFit.coordinates(
-          coordinates: coords,
-          padding: const EdgeInsets.all(56),
-        ));
-      }
-    } catch (_) {}
-  }
-
-  Widget _mapView(RoomController controller) {
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: const LatLng(-23.5505, -46.6333),
-            initialZoom: 13,
-            onMapReady: () {
-              _mapReady = true;
-              _fitMapIfNeeded();
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'br.com.radiopx',
-            ),
-            MarkerLayer(markers: _buildMarkers(controller)),
-          ],
-        ),
-        if (controller.locations.isEmpty)
-          Center(
-            child: Card(
-              color: Colors.black.withValues(alpha: 0.6),
-              child: const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Aguardando posição dos participantes...'),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  List<Marker> _buildMarkers(RoomController controller) {
-    return controller.locations.values.map((loc) {
-      final isMe = loc.userId == controller.myUserId;
-      final label = loc.username.isEmpty ? '?' : loc.username[0].toUpperCase();
-      return Marker(
-        point: LatLng(loc.lat, loc.lng),
-        width: 96,
-        height: 72,
-        alignment: Alignment.topCenter,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor:
-                  isMe ? const Color(0xFF525E68) : const Color(0xFF35383D),
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 16, color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                isMe ? 'Você' : loc.username,
-                style: const TextStyle(color: Colors.white, fontSize: 10),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      );
-    }).toList();
   }
 
   // ---------------- Lista de participantes ----------------
@@ -302,13 +187,6 @@ class _RoomScreenState extends State<RoomScreen> {
       appBar: AppBar(
         title: Text(widget.channel.name),
         actions: [
-          IconButton(
-            icon: Icon(
-              controller.showMap ? Icons.group : Icons.map_outlined,
-            ),
-            tooltip: controller.showMap ? 'Ver membros' : 'Ver mapa',
-            onPressed: controller.toggleMap,
-          ),
           PopupMenuButton<String>(
             tooltip: 'Opções',
             onSelected: (value) {
@@ -338,7 +216,6 @@ class _RoomScreenState extends State<RoomScreen> {
           listenable: controller,
           builder: (context, _) {
             _showPendingNotice();
-            _scheduleFitMap();
             return ContentWidth(
               child: Column(
                 children: [
@@ -349,22 +226,21 @@ class _RoomScreenState extends State<RoomScreen> {
                         .where((m) => m.userId != controller.myUserId)
                         .length,
                   ),
-                  if (!controller.showMap)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(24, 8, 24, 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'PESSOAS NO CANAL',
-                          style: TextStyle(
-                            color: pxMuted,
-                            fontSize: 11,
-                            letterSpacing: 1.8,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(24, 8, 24, 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'PESSOAS NO CANAL',
+                        style: TextStyle(
+                          color: pxMuted,
+                          fontSize: 11,
+                          letterSpacing: 1.8,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
+                  ),
                   if (controller.connectionError != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(
@@ -380,9 +256,7 @@ class _RoomScreenState extends State<RoomScreen> {
                     ),
                   _playbackStatus(controller),
                   Expanded(
-                    child: controller.showMap
-                        ? _mapView(controller)
-                        : _membersList(controller),
+                    child: _membersList(controller),
                   ),
                   _recordArea(controller),
                 ],
