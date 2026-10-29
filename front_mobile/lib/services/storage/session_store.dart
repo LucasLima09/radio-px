@@ -14,8 +14,12 @@ class SessionStore {
     await prefs.setString(_key, jsonEncode(session.toJson()));
   }
 
+  /// Lê a sessão do disco. O beacon roda em outro isolate e também renova os
+  /// tokens; o reload descarta o cache em memória deste isolate para enxergar
+  /// a sessão mais recente gravada por qualquer um dos dois.
   Future<AuthSession?> load() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final raw = prefs.getString(_key);
     if (raw == null) return null;
     try {

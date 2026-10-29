@@ -14,10 +14,20 @@ import 'api_exception.dart';
 /// Também é o dono do ciclo do token de acesso: renova antes de expirar e
 /// persiste a sessão renewed para que o app sobreviva a ser encerrado.
 class ApiClient {
-  ApiClient({required this.baseUrl, required this.sessionStore});
+  ApiClient({
+    required this.baseUrl,
+    required this.sessionStore,
+    http.Client? httpClient,
+  }) : _http = httpClient ?? http.Client();
 
   final String baseUrl;
   final SessionStore sessionStore;
+  final http.Client _http;
+
+  /// Renovação em andamento, compartilhada por quem pedir outra ao mesmo
+  /// tempo: o refresh token é de uso único, então duas renovações paralelas
+  /// com ele derrubariam a sessão.
+  Future<bool>? _refreshing;
 
   String? _accessToken;
   String? _refreshToken;
@@ -59,12 +69,20 @@ class ApiClient {
     return PublicUser.fromJson(_decode(res));
   }
 
-  Future<bool> refresh() async {
+  Future<bool> refresh() {
+    return _refreshing ??= _refresh().whenComplete(() => _refreshing = null);
+  }
+
+  Future<bool> _refresh() async {
+    // O beacon (outro isolate) pode ter renovado antes: nesse caso o token em
+    // memória já foi revogado e o salvo no disco é o válido.
+    if (await _adoptStoredSession() && !_isExpired()) return true;
+
     final rt = _refreshToken;
     if (rt == null) return false;
     http.Response res;
     try {
-      res = await http
+      res = await _http
           .post(
             _uri('/api/v1/auth/refresh'),
             headers: _headers(false),
@@ -75,6 +93,9 @@ class ApiClient {
       return false;
     }
     if (res.statusCode != 200) {
+      // Recusado porque o outro isolate renovou com o mesmo token ao mesmo
+      // tempo: a sessão dele já está no disco.
+      if (await _adoptStoredSession()) return true;
       _accessToken = null;
       _accessTokenExpiresAt = 0;
       return false;
@@ -82,6 +103,15 @@ class ApiClient {
     final session = AuthSession.fromJson(_decode(res));
     setSession(session);
     await sessionStore.save(session);
+    return true;
+  }
+
+  /// Assume a sessão salva quando ela traz um refresh token diferente do que
+  /// está em memória, ou seja, foi renovada por outro isolate.
+  Future<bool> _adoptStoredSession() async {
+    final stored = await sessionStore.load();
+    if (stored == null || stored.refreshToken == _refreshToken) return false;
+    setSession(stored);
     return true;
   }
 
@@ -185,10 +215,13 @@ class ApiClient {
     req.headers.addAll(_headers(authed));
     if (body != null) req.body = jsonEncode(body);
     try {
-      final streamed = await req.send().timeout(_timeout);
+      final streamed = await _http.send(req).timeout(_timeout);
       return await http.Response.fromStream(streamed).timeout(_timeout);
     } on TimeoutException {
-      throw ApiException(0, 'O servidor $baseUrl não respondeu em 15 segundos. Verifique a conexão e o endereço.');
+      throw ApiException(
+        0,
+        'O servidor $baseUrl não respondeu em 15 segundos. Verifique a conexão e o endereço.',
+      );
     } on http.ClientException catch (error) {
       throw ApiException(0, 'Falha ao acessar $baseUrl: ${error.message}');
     }
