@@ -1,0 +1,1 @@
+import{z as a}from"./app-CCm-iwwX.js";const s={latest(){return a.get("/api/v1/admin/locations")},history(i,r=200){const t=new URLSearchParams;return i&&t.set("userId",i),t.set("limit",String(r)),a.get(`/api/v1/admin/locations/history?${t.toString()}`)}};export{s as l};

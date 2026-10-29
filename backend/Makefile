@@ -40,9 +40,9 @@ reset-db:
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d --build
 
-## Compila o painel React (admin_web) para o pacote Go embutido
+## Compila o painel Vue (admin_vue) para o pacote Go embutido
 web:
-	cd ../admin_web && npm install && npm run build
+	cd ../admin_vue && npm install && npm run build
 
 ## Build the binary locally
 build:

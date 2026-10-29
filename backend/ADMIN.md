@@ -1,6 +1,6 @@
 # Painel admin
 
-O painel é a aplicação React em `admin_web`. Ela é compilada para
+O painel é a aplicação Vue 3 em `admin_vue`. Ela é compilada para
 `internal/infrastructure/http/adminui/dist` e embutida no binário Go via
 `//go:embed`, sendo servida em `http://localhost:8080/admin` (e também na rede
 local, ex.: `http://<ip>:8080/admin`), sem precisar de servidor de frontend
@@ -8,10 +8,10 @@ separado. É o painel principal de administração.
 
 ## Como recompilar o painel
 
-Sempre que algo em `admin_web` mudar, gere o build antes de compilar o backend:
+Sempre que algo em `admin_vue` mudar, gere o build antes de compilar o backend:
 
 ```bash
-cd admin_web
+cd admin_vue
 npm install
 npm run build   # gera ../backend/internal/infrastructure/http/adminui/dist
 ```
@@ -32,15 +32,16 @@ do diretório embutido e recompila sozinho após um novo `npm run build`.
 - **Mapa ao vivo**: últimas posições via `/api/v1/admin/locations`, atualizado a cada 5 segundos.
 - **Usuários**: listar, renomear, alterar `role` (`user`/`admin`) e **excluir** contas. A exclusão remove também canais, posições e tokens do usuário e não pode ser desfeita.
 - **Canais**: listagem de canais, quantidade de pessoas online agora e exclusão (bloqueada quando há participantes conectados).
+- **Histórico de posições**: registros de posição filtráveis por motorista, via `/api/v1/admin/locations/history`.
 
 Todas as rotas `/api/v1/admin/*` exigem login administrativo e aceitam
 administradores por `role=admin` ou pelos UUIDs configurados em `ADMIN_USER_IDS`.
 
 ## Mapa dos motoristas
 
-O mapa usa a biblioteca Leaflet empacotada pelo próprio bundle React; as imagens
+O mapa usa a biblioteca Leaflet empacotada pelo próprio bundle do painel; as imagens
 do mapa vêm do OpenStreetMap e exigem conexão com a internet. A licença está em
-`admin_web/public/LEAFLET-LICENSE.txt` (servida em `/admin/LEAFLET-LICENSE.txt`).
+`admin_vue/public/LEAFLET-LICENSE.txt` (servida em `/admin/LEAFLET-LICENSE.txt`).
 
 O aplicativo envia GPS ao entrar em um canal, com permissão de localização: ao se
 mover cerca de 10 metros e a cada 30 segundos quando parado. O mapa mostra
