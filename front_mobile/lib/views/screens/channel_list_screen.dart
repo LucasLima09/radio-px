@@ -7,6 +7,7 @@ import '../../models/active_session.dart';
 import '../../models/channel.dart';
 import '../../routes.dart';
 import '../../theme/app_colors.dart';
+import '../widgets/channel_dialogs.dart';
 import 'profile_screen.dart';
 
 /// Tela principal: lista de canais e, na outra aba, o perfil.
@@ -52,41 +53,21 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   Future<void> _createChannel() async {
     final controller = _channels!;
     if (controller.isCreating) return;
-    final nameCtrl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Novo canal'),
-        content: TextField(
-          controller: nameCtrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nome do canal',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(nameCtrl.text.trim()),
-            child: const Text('Criar'),
-          ),
-        ],
-      ),
-    );
-    nameCtrl.dispose();
-
-    if (name == null || name.isEmpty) return;
+    final request = await showNewChannelDialog(context);
+    if (request == null) return;
     if (!mounted) return;
-    final channel = await controller.create(name);
+    final channel = await controller.create(
+      request.name,
+      isPrivate: request.isPrivate,
+      password: request.password,
+    );
     if (!mounted) return;
     if (channel == null) {
       final error = controller.error;
       if (error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error)));
       }
       return;
     }
@@ -94,6 +75,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   }
 
   Future<void> _openChannel(Channel channel) async {
+    if (!await _unlock(channel)) return;
+    if (!mounted) return;
     await Navigator.of(context).pushNamed(
       AppRoutes.room,
       arguments: RoomArgs(session: widget.session, channel: channel),
@@ -101,13 +84,38 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     if (mounted) await _channels!.load();
   }
 
+  /// Garante acesso a um canal privado antes de abrir a sala. Membros e o
+  /// dono entram direto; os demais precisam informar a senha.
+  Future<bool> _unlock(Channel channel) async {
+    final controller = _channels!;
+    if (!channel.isPrivate || channel.ownerId == controller.user.id) {
+      return true;
+    }
+    try {
+      if (await controller.joinPrivate(channel)) return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+      return false;
+    }
+    if (!mounted) return false;
+    return showChannelPasswordDialog(
+      context,
+      channelName: channel.name,
+      onSubmit: (password) =>
+          controller.joinPrivate(channel, password: password),
+    );
+  }
+
   Future<void> _logout() async {
     await _channels!.logout();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.login,
-      (route) => false,
-    );
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
   }
 
   @override
@@ -116,9 +124,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_tab == 0 ? 'Canais' : 'Meu perfil'),
-        actions: [
-          TextButton(onPressed: _logout, child: const Text('Sair')),
-        ],
+        actions: [TextButton(onPressed: _logout, child: const Text('Sair'))],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
@@ -141,9 +147,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           : FloatingActionButton.extended(
               onPressed: _createChannel,
               icon: const Icon(Icons.add),
-              label: Text(
-                controller.isCreating ? 'Criando...' : 'Novo canal',
-              ),
+              label: Text(controller.isCreating ? 'Criando...' : 'Novo canal'),
             ),
       body: IndexedStack(
         index: _tab,
@@ -167,11 +171,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       return ListView(
         children: [
           const SizedBox(height: 120),
-          const Icon(
-            Icons.radio_outlined,
-            size: 64,
-            color: Colors.white24,
-          ),
+          const Icon(Icons.radio_outlined, size: 64, color: Colors.white24),
           const SizedBox(height: 12),
           Text(
             controller.error ??
@@ -204,7 +204,11 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                 color: pxIconTile,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.tag, color: pxAccent, size: 20),
+              child: Icon(
+                ch.isPrivate ? Icons.lock_outline : Icons.tag,
+                color: pxAccent,
+                size: 20,
+              ),
             ),
             title: Text(ch.name),
             subtitle: Row(

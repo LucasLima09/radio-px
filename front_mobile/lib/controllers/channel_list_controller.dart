@@ -67,13 +67,21 @@ class ChannelListController extends AppController {
   }
 
   /// Cria um canal e devolve o novo canal, ou `null` em caso de falha.
-  Future<Channel?> create(String name) async {
+  Future<Channel?> create(
+    String name, {
+    bool isPrivate = false,
+    String? password,
+  }) async {
     if (_creating) return null;
     _creating = true;
     _error = null;
     notify();
     try {
-      final channel = await api.createChannel(name);
+      final channel = await api.createChannel(
+        name,
+        isPrivate: isPrivate,
+        password: password,
+      );
       _channels = [...?_channels, channel];
       return channel;
     } catch (error) {
@@ -82,6 +90,20 @@ class ChannelListController extends AppController {
     } finally {
       _creating = false;
       notify();
+    }
+  }
+
+  /// Tenta entrar num canal privado antes de abrir a sala.
+  ///
+  /// Devolve `true` se entrou (ou já era membro) e `false` se a API recusou
+  /// por falta de senha ou senha errada. Outras falhas são relançadas.
+  Future<bool> joinPrivate(Channel channel, {String? password}) async {
+    try {
+      await api.joinChannel(channel.id, password: password);
+      return true;
+    } on ApiException catch (error) {
+      if (error.statusCode == 403) return false;
+      rethrow;
     }
   }
 

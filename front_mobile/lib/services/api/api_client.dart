@@ -172,16 +172,28 @@ class ApiClient {
     return user;
   }
 
-  Future<Channel> createChannel(String name) async {
+  /// Cria um canal. [password] só é enviada para canais privados.
+  Future<Channel> createChannel(
+    String name, {
+    bool isPrivate = false,
+    String? password,
+  }) async {
     final data = await _authed('POST', '/api/v1/channels', {
       'name': name,
-      'isPrivate': false,
+      'isPrivate': isPrivate,
+      if (isPrivate) 'password': ?password,
     });
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<Channel> joinChannel(String id) async {
-    final data = await _authed('POST', '/api/v1/channels/$id/join');
+  /// Entra no canal. Canais privados pedem [password] só na primeira vez;
+  /// sem ela, ou com a senha errada, a API responde 403.
+  Future<Channel> joinChannel(String id, {String? password}) async {
+    final data = await _authed(
+      'POST',
+      '/api/v1/channels/$id/join',
+      password == null ? null : {'password': password},
+    );
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:front_mobile/models/auth_session.dart';
 import 'package:front_mobile/models/public_user.dart';
 import 'package:front_mobile/services/api/api_client.dart';
+import 'package:front_mobile/services/api/api_exception.dart';
 import 'package:front_mobile/services/storage/session_store.dart';
 
 const _user = PublicUser(id: '1', username: 'motorista');
@@ -95,5 +96,73 @@ void main() {
 
     expect(await api.refresh(), isFalse);
     expect(api.accessToken, isNull);
+  });
+
+  group('canais privados', () {
+    const channelJson = {
+      'id': 'c1',
+      'name': 'Diretoria',
+      'isPrivate': true,
+      'ownerId': '1',
+      'members': 1,
+    };
+
+    Future<(ApiClient, List<http.Request>)> build(int status) async {
+      final requests = <http.Request>[];
+      final client = MockClient((req) async {
+        requests.add(req);
+        return status == 200
+            ? http.Response(jsonEncode(channelJson), 200)
+            : http.Response(
+                jsonEncode({'error': 'invalid channel password'}),
+                status,
+              );
+      });
+      final api = ApiClient(
+        baseUrl: 'http://x',
+        sessionStore: SessionStore(),
+        httpClient: client,
+      )..setSession(_session('a', expiresAt: _inOneHour()));
+      return (api, requests);
+    }
+
+    test('cria canal privado enviando a senha', () async {
+      final (api, requests) = await build(200);
+      await api.createChannel(
+        'Diretoria',
+        isPrivate: true,
+        password: 'segredo',
+      );
+      expect(jsonDecode(requests.single.body), {
+        'name': 'Diretoria',
+        'isPrivate': true,
+        'password': 'segredo',
+      });
+    });
+
+    test('canal público não envia senha', () async {
+      final (api, requests) = await build(200);
+      await api.createChannel('Geral', password: 'ignorada');
+      expect(jsonDecode(requests.single.body), {
+        'name': 'Geral',
+        'isPrivate': false,
+      });
+    });
+
+    test('entrar com senha envia o corpo; sem senha, nenhum', () async {
+      final (api, requests) = await build(200);
+      await api.joinChannel('c1');
+      await api.joinChannel('c1', password: 'segredo');
+      expect(requests[0].body, isEmpty);
+      expect(jsonDecode(requests[1].body), {'password': 'segredo'});
+    });
+
+    test('senha errada vira ApiException 403', () async {
+      final (api, _) = await build(403);
+      expect(
+        () => api.joinChannel('c1', password: 'errada'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 403)),
+      );
+    });
   });
 }
