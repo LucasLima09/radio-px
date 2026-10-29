@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// O painel React (admin_web) é compilado para dist/ e embutido no binário.
+// O painel Vue (admin_vue) é compilado para dist/ e embutido no binário.
 //
 //go:embed dist
 var assets embed.FS
@@ -50,7 +50,7 @@ func mustSub(fsys embed.FS, dir string) fs.FS {
 	return sub
 }
 
-// Serve entrega o painel React embutido em /admin.
+// Serve entrega o painel Vue embutido em /admin.
 func Serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	w.Header().Set("X-Content-Type-Options", "nosniff")

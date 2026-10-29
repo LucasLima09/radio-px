@@ -1,0 +1,71 @@
+/* Radio PX Admin — design tokens + layout
+   Tema claro é o padrão; tema escuro via [data-theme='dark'] no <html>. */
+
+:root {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f7;
+  --border: #d9e0ea;
+  --border-strong: #c3cddb;
+  --text: #1b2430;
+  --text-2: #46536a;
+  --muted: #6b7a90;
+  --accent: #2f6fed;
+  --accent-hover: #255fd4;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(47, 111, 237, 0.1);
+  --danger: #d92d3a;
+  --danger-hover: #b8222e;
+  --danger-border: rgba(217, 45, 58, 0.45);
+  --danger-soft: rgba(217, 45, 58, 0.1);
+  --success: #1a7f5a;
+  --success-soft: rgba(26, 127, 90, 0.12);
+  --warning-bg: #fff3d6;
+  --warning-text: #805c18;
+  --warning-border: #ead7a6;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 10px 28px -16px rgba(16, 24, 40, 0.3);
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e4eaf2;
+  --topbar-bg: #ffffff;
+  --map-bg: #e7ecf2;
+  --login-from: #203d66;
+  --login-to: #101e33;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #0e1319;
+  --surface: #171e28;
+  --surface-2: #1c2530;
+  --surface-3: #232e3b;
+  --border: #2b3644;
+  --border-strong: #3a4656;
+  --text: #e8ecf2;
+  --text-2: #c3cbd7;
+  --muted: #97a3b4;
+  --accent: #5b8def;
+  --accent-hover: #6f9bf3;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(91, 141, 239, 0.16);
+  --danger: #ff6b6b;
+  --danger-hover: #ff5252;
+  --danger-border: rgba(255, 107, 107, 0.5);
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --success: #4ecb8d;
+  --success-soft: rgba(78, 203, 141, 0.14);
+  --warning-bg: #3a2f14;
+  --warning-text: #f2cd84;
+  --warning-border: #5a4820;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -20px rgba(0, 0, 0, 0.75);
+  --sidebar-bg: #141b24;
+  --sidebar-border: #263140;
+  --topbar-bg: #131a22;
+  --map-bg: #0b0f14;
+  --login-from: #0d1622;
+  --login-to: #070b10;
+  color-scheme: dark;
+}
+

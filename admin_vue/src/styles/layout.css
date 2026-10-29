@@ -1,0 +1,262 @@
+/* ---------- Layout (sidebar + conteúdo) ---------- */
+
+.shell {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+}
+
+.menu-toggle,
+.menu-overlay {
+  display: none;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  min-height: 0;
+  padding: 12px;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 12px 30px;
+}
+
+.brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.sidebar-brand h1 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.sidebar-brand span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.nav-caption {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  padding: 0 16px 10px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  flex: 1;
+}
+
+.sidebar-nav button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  border-radius: 9px;
+  padding: 12px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.sidebar-nav button strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sidebar-nav button small {
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.sidebar-nav button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.sidebar-nav button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sidebar-nav button.active small {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.nav-icon {
+  font-size: 22px;
+  width: 25px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.nav-arrow {
+  margin-left: auto;
+  font-size: 20px;
+}
+
+.sidebar-note {
+  margin: 20px 10px;
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.sidebar-note p {
+  line-height: 1.7;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.status-dot {
+  display: inline-block;
+  background: var(--success);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 4px 8px;
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.account {
+  flex: 1;
+  min-width: 0;
+}
+
+.account strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.account small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.sidebar-footer .danger {
+  padding: 6px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  min-height: 64px;
+  padding: 16px 32px;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.topbar strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.breadcrumb-divider {
+  margin: 0 12px;
+  color: var(--border-strong);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-badge {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
