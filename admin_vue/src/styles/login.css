@@ -3,10 +3,19 @@
 .login-shell {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 28px;
   padding: 24px;
   background: radial-gradient(ellipse at top, var(--login-from), var(--login-to) 72%);
+}
+
+.login-logo {
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  user-select: none;
 }
 
 .login-card {

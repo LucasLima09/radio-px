@@ -2,15 +2,15 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
+import logoUrl from '../../../assets/images/logoktm.png';
+
 import AlertMessage from '@/components/AlertMessage.vue';
-import { SERVER_PLACEHOLDER } from '@/core/config';
 import { errorMessage } from '@/core/http/errors';
 import { useAuthStore } from '@/stores/auth.store';
 
 const auth = useAuthStore();
 const router = useRouter();
 
-const server = ref(auth.server);
 const username = ref('');
 const password = ref('');
 const busy = ref(false);
@@ -21,7 +21,7 @@ async function submit(): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    await auth.login(server.value, username.value.trim(), password.value);
+    await auth.login(username.value.trim(), password.value);
     await router.push({ name: 'overview' });
   } catch (e) {
     error.value = errorMessage(e, 'Falha ao entrar');
@@ -33,17 +33,14 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="login-shell">
+    <img class="login-logo" :src="logoUrl" alt="KTM Indústria" />
     <div class="login-card">
       <h1>Radio PX · Admin</h1>
       <p class="subtitle">Acesso restrito · relatório de posição</p>
       <AlertMessage :message="error" />
       <label>
-        Servidor
-        <input v-model="server" :placeholder="SERVER_PLACEHOLDER" />
-      </label>
-      <label>
         Usuário
-        <input v-model="username" autocomplete="username" />
+        <input v-model="username" autocomplete="username" autofocus />
       </label>
       <label>
         Senha
