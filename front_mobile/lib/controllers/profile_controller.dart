@@ -7,6 +7,8 @@ import 'app_controller.dart';
 import '../models/public_user.dart';
 import '../services/api/api_client.dart';
 import '../services/api/api_exception.dart';
+import '../utils/input_masks.dart';
+import '../utils/validators.dart';
 
 /// Controller do perfil: carrega os dados, valida a foto e salva.
 class ProfileController extends AppController {
@@ -17,6 +19,11 @@ class ProfileController extends AppController {
     this.onUserChanged,
   })  : _picker = picker ?? ImagePicker(),
         _username = user.username,
+        _savedUsername = user.username,
+        _firstName = user.firstName ?? '',
+        _lastName = user.lastName ?? '',
+        _vehiclePlate = formatPlate(user.vehiclePlate ?? ''),
+        _phone = formatPhone(user.phone ?? ''),
         _avatar = user.avatar;
 
   final ApiClient api;
@@ -30,6 +37,11 @@ class ProfileController extends AppController {
   final ImagePicker _picker;
 
   String _username;
+  String _savedUsername;
+  String _firstName;
+  String _lastName;
+  String _vehiclePlate;
+  String _phone;
   String? _avatar;
   bool _photoChanged = false;
   bool _saving = false;
@@ -38,6 +50,10 @@ class ProfileController extends AppController {
   String? _error;
 
   String get username => _username;
+  String get firstName => _firstName;
+  String get lastName => _lastName;
+  String get vehiclePlate => _vehiclePlate;
+  String get phone => _phone;
   String? get avatar => _avatar;
   bool get isSaving => _saving;
   bool get isPicking => _picking;
@@ -51,8 +67,7 @@ class ProfileController extends AppController {
   Future<void> load() async {
     try {
       final user = await api.getProfile();
-      _username = user.username;
-      _avatar = user.avatar;
+      _apply(user);
       onUserChanged?.call(user);
     } catch (_) {
       _error = 'Não foi possível atualizar o perfil. '
@@ -70,12 +85,56 @@ class ProfileController extends AppController {
     notify();
   }
 
+  void setFirstName(String value) {
+    if (_firstName == value) return;
+    _firstName = value;
+    notify();
+  }
+
+  void setLastName(String value) {
+    if (_lastName == value) return;
+    _lastName = value;
+    notify();
+  }
+
+  /// Contas antigas podem ter um usuário fora da regra atual (com espaços,
+  /// por exemplo): ele continua valendo enquanto não for alterado.
+  String? validateUsername(String? value) =>
+      value?.trim() == _savedUsername ? null : Validators.username(value);
+
+  void setVehiclePlate(String value) {
+    if (_vehiclePlate == value) return;
+    _vehiclePlate = value;
+    notify();
+  }
+
+  void setPhone(String value) {
+    if (_phone == value) return;
+    _phone = value;
+    notify();
+  }
+
+  void _apply(PublicUser user) {
+    _username = user.username;
+    _savedUsername = user.username;
+    _firstName = user.firstName ?? '';
+    _lastName = user.lastName ?? '';
+    _vehiclePlate = formatPlate(user.vehiclePlate ?? '');
+    _phone = formatPhone(user.phone ?? '');
+    _avatar = user.avatar;
+  }
+
   /// Salva as alterações e devolve o usuário atualizado, ou `null` em caso de
   /// falha (o motivo fica em [error]).
   Future<PublicUser?> save() async {
     if (_saving) return null;
-    if (_username.trim().runes.length < 3) {
-      _error = 'Use pelo menos 3 caracteres';
+    final invalid = validateUsername(_username) ??
+        Validators.firstName(_firstName) ??
+        Validators.lastName(_lastName) ??
+        Validators.plate(_vehiclePlate) ??
+        Validators.phone(_phone);
+    if (invalid != null) {
+      _error = invalid;
       notify();
       return null;
     }
@@ -85,16 +144,19 @@ class ProfileController extends AppController {
     try {
       final user = await api.updateProfile(
         username: _username.trim(),
+        firstName: _firstName.trim(),
+        lastName: _lastName.trim(),
+        vehiclePlate: normalizePlate(_vehiclePlate),
+        phone: normalizePhone(_phone),
         avatar: _photoChanged ? (_avatar ?? '') : null,
       );
-      _username = user.username;
-      _avatar = user.avatar;
+      _apply(user);
       _photoChanged = false;
       onUserChanged?.call(user);
       return user;
     } on ApiException catch (error) {
       _error = error.statusCode == 409
-          ? 'Esse nome já está em uso. Escolha outro.'
+          ? 'Esse usuário já está em uso. Escolha outro.'
           : error.message;
       return null;
     } catch (_) {
