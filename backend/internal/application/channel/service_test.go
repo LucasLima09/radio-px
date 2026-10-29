@@ -61,37 +61,59 @@ func (r *memoryChannelRepo) IsMember(_ context.Context, channelID, userID uuid.U
 func TestPrivateChannelAccess(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(newMemoryChannelRepo(), nil)
-	owner, member, stranger := uuid.New(), uuid.New(), uuid.New()
+	owner, stranger := uuid.New(), uuid.New()
 
 	public, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Geral"})
 	if err != nil {
 		t.Fatalf("create public: %v", err)
 	}
-	private, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Diretoria", IsPrivate: true})
+	private, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Diretoria", IsPrivate: true, Password: "segredo"})
 	if err != nil {
 		t.Fatalf("create private: %v", err)
 	}
-	if err := svc.channels.AddMember(ctx, private.ID, member); err != nil {
-		t.Fatalf("add member: %v", err)
+
+	if got := len(svc.List(ctx)); got != 2 {
+		t.Fatalf("private channels must be listed so people can join them, saw %d", got)
 	}
 
-	if got := len(svc.List(ctx, stranger)); got != 1 {
-		t.Fatalf("stranger should only see the public channel, saw %d", got)
-	}
-	if got := len(svc.List(ctx, member)); got != 2 {
-		t.Fatalf("member should see both channels, saw %d", got)
-	}
-
-	if _, err := svc.GetVisible(ctx, private.ID, stranger); !errors.Is(err, domainchannel.ErrNotFound) {
-		t.Fatalf("stranger must not see the private channel, got %v", err)
-	}
-	if _, err := svc.Join(ctx, private.ID, stranger); !errors.Is(err, domainchannel.ErrPrivateChannel) {
-		t.Fatalf("stranger must not join the private channel, got %v", err)
-	}
-	if _, err := svc.Join(ctx, private.ID, member); err != nil {
-		t.Fatalf("existing member must rejoin: %v", err)
-	}
-	if _, err := svc.Join(ctx, public.ID, stranger); err != nil {
+	if _, err := svc.Join(ctx, public.ID, stranger, ""); err != nil {
 		t.Fatalf("anyone joins a public channel: %v", err)
+	}
+	if _, err := svc.Join(ctx, private.ID, owner, ""); err != nil {
+		t.Fatalf("owner joins without password: %v", err)
+	}
+	if _, err := svc.Join(ctx, private.ID, stranger, ""); !errors.Is(err, domainchannel.ErrPasswordRequired) {
+		t.Fatalf("stranger without password: want ErrPasswordRequired, got %v", err)
+	}
+	if _, err := svc.Join(ctx, private.ID, stranger, "errada"); !errors.Is(err, domainchannel.ErrWrongPassword) {
+		t.Fatalf("stranger with wrong password: want ErrWrongPassword, got %v", err)
+	}
+	if _, err := svc.Join(ctx, private.ID, stranger, "segredo"); err != nil {
+		t.Fatalf("stranger with right password: %v", err)
+	}
+	if _, err := svc.Join(ctx, private.ID, stranger, ""); err != nil {
+		t.Fatalf("a member rejoins without password: %v", err)
+	}
+}
+
+func TestCreatePrivateChannelPassword(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(newMemoryChannelRepo(), nil)
+	owner := uuid.New()
+
+	if _, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Sem senha", IsPrivate: true}); !errors.Is(err, domainchannel.ErrWeakPassword) {
+		t.Fatalf("private channel without password: want ErrWeakPassword, got %v", err)
+	}
+	if _, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Curta", IsPrivate: true, Password: "123"}); !errors.Is(err, domainchannel.ErrWeakPassword) {
+		t.Fatalf("short password: want ErrWeakPassword, got %v", err)
+	}
+
+	public, err := svc.Create(ctx, CreateInput{OwnerID: owner, Name: "Aberto", Password: "ignorada"})
+	if err != nil {
+		t.Fatalf("create public: %v", err)
+	}
+	stored, _ := svc.channels.FindByID(ctx, public.ID)
+	if stored.PasswordHash != "" {
+		t.Fatal("public channels must not store a password")
 	}
 }

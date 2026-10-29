@@ -41,6 +41,11 @@ func (h *ChannelHandler) withOnline(channels []domainchannel.Public) {
 type createChannelRequest struct {
 	Name      string `json:"name"`
 	IsPrivate bool   `json:"isPrivate"`
+	Password  string `json:"password"`
+}
+
+type joinChannelRequest struct {
+	Password string `json:"password"`
 }
 
 func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +64,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		OwnerID:   u.ID,
 		Name:      req.Name,
 		IsPrivate: req.IsPrivate,
+		Password:  req.Password,
 	})
 	if err != nil {
 		writeDomainError(w, err)
@@ -69,18 +75,18 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
-	u, ok := middleware.UserFromContext(r.Context())
+	_, ok := middleware.UserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	channels := h.service.List(r.Context(), u.ID)
+	channels := h.service.List(r.Context())
 	h.withOnline(channels)
 	writeJSON(w, http.StatusOK, channels)
 }
 
 func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
-	u, ok := middleware.UserFromContext(r.Context())
+	_, ok := middleware.UserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -92,7 +98,7 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := h.service.GetVisible(r.Context(), id, u.ID)
+	ch, err := h.service.Get(r.Context(), id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -117,7 +123,15 @@ func (h *ChannelHandler) Join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := h.service.Join(r.Context(), id, u.ID)
+	// The body is optional: public channels and returning members need none.
+	var req joinChannelRequest
+	if r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &req); err != nil {
+			return
+		}
+	}
+
+	ch, err := h.service.Join(r.Context(), id, u.ID, req.Password)
 	if err != nil {
 		writeDomainError(w, err)
 		return

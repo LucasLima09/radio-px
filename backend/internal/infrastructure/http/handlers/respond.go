@@ -26,9 +26,12 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, user.ErrInvalidUsername) ||
 		errors.Is(err, user.ErrWeakPassword) ||
-		errors.Is(err, domainchannel.ErrInvalidChannelName):
+		errors.Is(err, domainchannel.ErrInvalidChannelName) ||
+		errors.Is(err, domainchannel.ErrWeakPassword):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
-	case errors.Is(err, domainchannel.ErrPrivateChannel):
+	// 403, not 401: the client treats 401 as an expired access token.
+	case errors.Is(err, domainchannel.ErrPasswordRequired) ||
+		errors.Is(err, domainchannel.ErrWrongPassword):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, err.Error())

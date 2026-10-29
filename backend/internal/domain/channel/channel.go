@@ -12,7 +12,15 @@ var (
 	ErrInvalidChannelName = errors.New("channel name must have at least 1 character")
 	ErrAlreadyMember      = errors.New("user is already a member of this channel")
 	ErrNotMember          = errors.New("user is not a member of this channel")
-	ErrPrivateChannel     = errors.New("private channel: only members can join")
+	ErrPasswordRequired   = errors.New("channel password required")
+	ErrWrongPassword      = errors.New("invalid channel password")
+	ErrWeakPassword       = errors.New("channel password must have between 4 and 72 characters")
+)
+
+const (
+	minPasswordLen = 4
+	// bcrypt ignores everything past 72 bytes.
+	maxPasswordLen = 72
 )
 
 type Channel struct {
@@ -20,24 +28,43 @@ type Channel struct {
 	OwnerID   uuid.UUID
 	Name      string
 	IsPrivate bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// PasswordHash is the bcrypt hash a non-member must match to join a
+	// private channel. Empty for public channels.
+	PasswordHash string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
-func New(ownerID uuid.UUID, name string, isPrivate bool) (*Channel, error) {
+// ValidatePassword checks the plain password chosen for a private channel.
+func ValidatePassword(password string) error {
+	if len(password) < minPasswordLen || len(password) > maxPasswordLen {
+		return ErrWeakPassword
+	}
+	return nil
+}
+
+// New builds a channel. passwordHash must be set for private channels and is
+// ignored for public ones.
+func New(ownerID uuid.UUID, name string, isPrivate bool, passwordHash string) (*Channel, error) {
 	name = strings.TrimSpace(name)
 	if len(name) == 0 {
 		return nil, ErrInvalidChannelName
 	}
+	if !isPrivate {
+		passwordHash = ""
+	} else if passwordHash == "" {
+		return nil, ErrPasswordRequired
+	}
 
 	now := time.Now().UTC()
 	return &Channel{
-		ID:        uuid.New(),
-		OwnerID:   ownerID,
-		Name:      name,
-		IsPrivate: isPrivate,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           uuid.New(),
+		OwnerID:      ownerID,
+		Name:         name,
+		IsPrivate:    isPrivate,
+		PasswordHash: passwordHash,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}, nil
 }
 
