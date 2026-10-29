@@ -38,7 +38,11 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnauthorized, "refresh token revoked")
 	case errors.Is(err, auth.ErrUsernameTaken) || errors.Is(err, user.ErrUsernameTaken):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, user.ErrInvalidRole):
+	case errors.Is(err, user.ErrInvalidRole) ||
+		errors.Is(err, user.ErrInvalidFirstName) ||
+		errors.Is(err, user.ErrInvalidLastName) ||
+		errors.Is(err, user.ErrInvalidPlate) ||
+		errors.Is(err, user.ErrInvalidPhone):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "internal server error")

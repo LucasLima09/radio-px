@@ -15,8 +15,10 @@ func NewAuthHandler(service *auth.Service) *AuthHandler {
 }
 
 type registerRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username  string `json:"username"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Password  string `json:"password"`
 }
 
 type loginRequest struct {
@@ -39,8 +41,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.service.Register(r.Context(), auth.RegisterInput{
-		Username: req.Username,
-		Password: req.Password,
+		Username:  req.Username,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Password:  req.Password,
 	})
 	if err != nil {
 		writeDomainError(w, err)

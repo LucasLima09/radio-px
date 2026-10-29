@@ -5,6 +5,7 @@ import '../di.dart';
 import '../models/active_session.dart';
 import '../services/api/api_client.dart';
 import '../services/api/api_exception.dart';
+import '../utils/validators.dart';
 
 /// Controller das telas de login e registro.
 ///
@@ -118,23 +119,22 @@ class AuthController extends AppController {
   Future<ActiveSession?> register({
     required String serverUrl,
     required String username,
+    required String firstName,
+    required String lastName,
     required String password,
     required String confirmPassword,
   }) async {
     if (_submitting) return null;
     final user = username.trim();
-    if (user.length < 3) {
-      _error = 'Usuário precisa ter pelo menos 3 caracteres';
-      notify();
-      return null;
-    }
-    if (password.length < 6) {
-      _error = 'Senha precisa ter pelo menos 6 caracteres';
-      notify();
-      return null;
-    }
-    if (password != confirmPassword) {
-      _error = 'As senhas não conferem';
+    final name = firstName.trim();
+    final surname = lastName.trim();
+    final invalid = Validators.username(user) ??
+        Validators.firstName(name) ??
+        Validators.lastName(surname) ??
+        Validators.password(password) ??
+        Validators.confirmPassword(confirmPassword, password);
+    if (invalid != null) {
+      _error = invalid;
       notify();
       return null;
     }
@@ -145,7 +145,12 @@ class AuthController extends AppController {
       final baseUrl = normalizeServerUrl(serverUrl);
       await deps.config.saveServerUrl(baseUrl);
       final api = ApiClient(baseUrl: baseUrl, sessionStore: deps.sessionStore);
-      final created = await api.register(user, password);
+      final created = await api.register(
+        username: user,
+        firstName: name,
+        lastName: surname,
+        password: password,
+      );
       final session = await api.login(user, password);
       _successMessage = 'Conta ${created.username} criada com sucesso';
       return ActiveSession(api: api, user: session.user);

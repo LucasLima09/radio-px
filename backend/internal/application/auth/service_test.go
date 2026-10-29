@@ -135,12 +135,12 @@ func TestRegisterAndLogin(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t)
 
-	created, err := svc.Register(ctx, RegisterInput{Username: "lucas", Password: "secret123"})
+	created, err := svc.Register(ctx, RegisterInput{Username: "lucas", FirstName: "Lucas", LastName: " Lima ", Password: "secret123"})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if created.Username != "lucas" {
-		t.Fatalf("expected username lucas, got %s", created.Username)
+	if created.Username != "lucas" || created.FirstName != "Lucas" || created.LastName != "Lima" {
+		t.Fatalf("expected lucas (Lucas Lima), got %s (%s %s)", created.Username, created.FirstName, created.LastName)
 	}
 
 	tokens, err := svc.Login(ctx, "lucas", "secret123")

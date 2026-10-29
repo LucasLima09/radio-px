@@ -44,9 +44,16 @@ class ApiClient {
     return session;
   }
 
-  Future<PublicUser> register(String username, String password) async {
+  Future<PublicUser> register({
+    required String username,
+    required String firstName,
+    required String lastName,
+    required String password,
+  }) async {
     final res = await _request('POST', '/api/v1/auth/register', {
       'username': username,
+      'firstName': firstName,
+      'lastName': lastName,
       'password': password,
     });
     return PublicUser.fromJson(_decode(res));
@@ -116,10 +123,18 @@ class ApiClient {
 
   Future<PublicUser> updateProfile({
     required String username,
+    String? firstName,
+    String? lastName,
+    String? vehiclePlate,
+    String? phone,
     String? avatar,
   }) async {
     final data = await _authed('PATCH', '/api/v1/profile', {
       'username': username,
+      'firstName': ?firstName,
+      'lastName': ?lastName,
+      'vehiclePlate': ?vehiclePlate,
+      'phone': ?phone,
       'avatar': ?avatar,
     });
     final user = PublicUser.fromJson(data as Map<String, dynamic>);

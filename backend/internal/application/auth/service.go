@@ -46,8 +46,10 @@ func NewService(users user.Repository, tokens user.RefreshTokenRepository, sign 
 }
 
 type RegisterInput struct {
-	Username string
-	Password string
+	Username  string
+	FirstName string
+	LastName  string
+	Password  string
 }
 
 type Tokens struct {
@@ -66,6 +68,15 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.Public, 
 		return user.Public{}, ErrUsernameTaken
 	}
 
+	firstName, err := user.NormalizeFirstName(in.FirstName)
+	if err != nil {
+		return user.Public{}, err
+	}
+	lastName, err := user.NormalizeLastName(in.LastName)
+	if err != nil {
+		return user.Public{}, err
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return user.Public{}, err
@@ -75,6 +86,8 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.Public, 
 	if err != nil {
 		return user.Public{}, err
 	}
+	u.FirstName = firstName
+	u.LastName = lastName
 	if err := s.users.Create(ctx, u); err != nil {
 		return user.Public{}, err
 	}

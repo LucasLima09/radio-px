@@ -4,11 +4,9 @@ import 'app_controller.dart';
 import '../models/audio_clip.dart';
 import '../models/channel.dart';
 import '../models/member.dart';
-import '../models/member_location.dart';
 import '../models/public_user.dart';
 import '../models/record_mode.dart';
 import '../services/api/api_client.dart';
-import '../services/location/location_tracker.dart';
 import '../services/radio/clip_recorder.dart';
 import '../services/radio/playback_cursor.dart';
 import '../services/radio/playback_queue.dart';
@@ -55,10 +53,8 @@ class RoomController extends AppController {
   late final RadioChannel _radio;
   late final ClipRecorder _recorder;
   late final PlaybackQueue _queue;
-  final LocationTracker _tracker = LocationTracker();
 
   RecordMode _recordMode = RecordMode.hold;
-  bool _showMap = false;
   bool _pttPressed = false;
   bool _startingRecording = false;
   bool _joining = false;
@@ -71,14 +67,12 @@ class RoomController extends AppController {
 
   RadioConnState get state => _radio.state;
   List<Member> get members => List.unmodifiable(_radio.members);
-  Map<String, MemberLocation> get locations => _radio.locations;
   String? get myUserId => _radio.myUserId;
   bool get isRecording => _recorder.isRecording;
   bool get audioPlaying => _queue.isPlaying && !_queue.isMuted;
   int get pendingCount => _queue.pendingCount;
   AudioClip? get currentPlayback => _queue.currentPlayback;
   RecordMode get recordMode => _recordMode;
-  bool get showMap => _showMap;
   bool get isPttPressed => _pttPressed;
   bool get isJoining => _joining;
   String? get connectionError => _connectionError;
@@ -88,12 +82,9 @@ class RoomController extends AppController {
   String? get notice => _notice;
   int get noticeId => _noticeId;
 
-  /// Prepara a sala: modo de gravação, rastreio de posição e conexão.
+  /// Prepara a sala: modo de gravação e conexão.
   Future<void> init() async {
     _recordMode = await config.loadRecordMode();
-    _tracker.onPosition = (lat, lng) => _radio.sendLocation(lat, lng);
-    _tracker.onError = _showNotice;
-    await _tracker.start();
     notify();
     await connect();
   }
@@ -126,7 +117,6 @@ class RoomController extends AppController {
   }
 
   void toggleMap() {
-    _showMap = !_showMap;
     notify();
   }
 
@@ -224,9 +214,6 @@ class RoomController extends AppController {
   void _handleRadioChanged() {
     final connected = _radio.state == RadioConnState.connected;
     if (connected && !_wasConnected) {
-      // Ao reconectar, a última posição conhecida vai primeiro: sem isso o
-      // marcador demora até o próximo movimento.
-      _tracker.sendLast();
       _connectionError = null;
     }
     _wasConnected = connected;
@@ -246,7 +233,6 @@ class RoomController extends AppController {
 
   Future<void> _cleanup() async {
     await _radio.dispose();
-    await _tracker.stop();
     await _recorder.dispose();
     await _queue.dispose();
   }

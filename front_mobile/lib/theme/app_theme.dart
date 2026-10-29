@@ -15,10 +15,11 @@ class AppTheme {
           primary: pxAccent,
           onPrimary: pxOnAccent,
           surface: pxSurface,
+          background: pxBackground,
         ),
-        scaffoldBackgroundColor: pxSurface,
+        scaffoldBackgroundColor: pxBackground,
         appBarTheme: const AppBarTheme(
-          backgroundColor: pxSurface,
+          backgroundColor: pxBackground,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           centerTitle: false,
@@ -30,13 +31,13 @@ class AppTheme {
         ),
         textTheme: const TextTheme(
           bodyLarge: TextStyle(fontSize: 15, color: pxText),
-          bodyMedium: TextStyle(fontSize: 14, color: Color(0xFFD0D1DC)),
-          titleMedium: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-          labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          bodyMedium: TextStyle(fontSize: 14, color: pxSecondaryText),
+          titleMedium: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: pxText),
+          labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: pxText),
         ),
         inputDecorationTheme: const InputDecorationTheme(
           filled: true,
-          fillColor: Color(0xFF181920),
+          fillColor: pxSurface,
           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -55,6 +56,8 @@ class AppTheme {
           style: FilledButton.styleFrom(
             minimumSize: const Size(48, 52),
             elevation: 0,
+            backgroundColor: pxAccent,
+            foregroundColor: pxOnAccent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),

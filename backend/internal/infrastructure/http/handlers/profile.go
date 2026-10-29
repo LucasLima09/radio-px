@@ -9,16 +9,20 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/middleware"
 )
 
 const maxAvatarBytes = 256 * 1024
 
 type profileRequest struct {
-	Username *string `json:"username"`
-	Avatar   *string `json:"avatar"`
+	Username     *string `json:"username"`
+	FirstName    *string `json:"firstName"`
+	LastName     *string `json:"lastName"`
+	Avatar       *string `json:"avatar"`
+	VehiclePlate *string `json:"vehiclePlate"`
+	Phone        *string `json:"phone"`
 }
 
 func (h *UsersHandler) Profile(w http.ResponseWriter, r *http.Request) {
@@ -41,18 +45,37 @@ func (h *UsersHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(w, r, &req); err != nil {
 		return
 	}
-	if req.Username == nil && req.Avatar == nil {
+	if req.Username == nil && req.FirstName == nil && req.LastName == nil &&
+		req.Avatar == nil && req.VehiclePlate == nil && req.Phone == nil {
 		writeError(w, http.StatusBadRequest, "Nenhuma alteração informada")
 		return
 	}
 	updated := *u
 	if req.Username != nil {
 		name := strings.TrimSpace(*req.Username)
-		if utf8.RuneCountInString(name) < 3 || utf8.RuneCountInString(name) > 50 {
-			writeError(w, http.StatusUnprocessableEntity, "O nome deve ter entre 3 e 50 caracteres")
+		// Contas antigas podem ter um nome fora da regra atual; só um nome
+		// novo precisa segui-la.
+		if name != u.Username && !user.ValidUsername(name) {
+			writeError(w, http.StatusUnprocessableEntity, "O usuário deve ter de 3 a 30 caracteres, sem espaços: letras, números, ponto, hífen ou sublinhado")
 			return
 		}
 		updated.Username = name
+	}
+	if req.FirstName != nil {
+		name, err := user.NormalizeFirstName(*req.FirstName)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "Primeiro nome inválido. Use apenas letras, até 50 caracteres")
+			return
+		}
+		updated.FirstName = name
+	}
+	if req.LastName != nil {
+		name, err := user.NormalizeLastName(*req.LastName)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "Sobrenome inválido. Use apenas letras, até 50 caracteres")
+			return
+		}
+		updated.LastName = name
 	}
 	if req.Avatar != nil {
 		if !validAvatar(*req.Avatar) {
@@ -60,6 +83,22 @@ func (h *UsersHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updated.Avatar = *req.Avatar
+	}
+	if req.VehiclePlate != nil {
+		plate, err := user.NormalizePlate(*req.VehiclePlate)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "Placa inválida. Use o padrão Mercosul: ABC1D23")
+			return
+		}
+		updated.VehiclePlate = plate
+	}
+	if req.Phone != nil {
+		phone, err := user.NormalizePhone(*req.Phone)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "Telefone inválido. Informe DDD e número (celular começa com 9)")
+			return
+		}
+		updated.Phone = phone
 	}
 	updated.UpdatedAt = time.Now().UTC()
 	if err := h.users.Update(r.Context(), &updated); err != nil {
