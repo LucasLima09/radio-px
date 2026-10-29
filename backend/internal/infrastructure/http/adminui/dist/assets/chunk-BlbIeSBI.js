@@ -1,0 +1,1 @@
+import{p as l}from"./app-CCm-iwwX.js";function u(o,a){let t=!1,n;async function e(){if(!t){t=!0;try{await o()}finally{t=!1}}}function r(){clearInterval(n),n=void 0}function i(){r(),e(),n=setInterval(e,a)}return i(),l(r),{run:e,restart:i,stop:r}}export{u};
