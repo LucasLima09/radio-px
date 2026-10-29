@@ -19,11 +19,11 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-const userColumns = "id, username, password_hash, role, created_at, updated_at, avatar"
+const userColumns = "id, username, password_hash, role, created_at, updated_at, avatar, first_name, last_name, vehicle_plate, phone"
 
 func scanUser(row pgx.Row) (*user.User, error) {
 	var u user.User
-	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.Avatar); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.Avatar, &u.FirstName, &u.LastName, &u.VehiclePlate, &u.Phone); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -31,9 +31,9 @@ func scanUser(row pgx.Row) (*user.User, error) {
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		u.ID, u.Username, u.PasswordHash, u.Role, u.CreatedAt, u.UpdatedAt,
+		`INSERT INTO users (id, username, password_hash, role, created_at, updated_at, first_name, last_name)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		u.ID, u.Username, u.PasswordHash, u.Role, u.CreatedAt, u.UpdatedAt, u.FirstName, u.LastName,
 	)
 	if err != nil {
 		return translateError(err)
@@ -82,8 +82,9 @@ func (r *UserRepository) List(ctx context.Context) ([]*user.User, error) {
 
 func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 	_, err := r.pool.Exec(ctx,
-		`UPDATE users SET username = $1, role = $2, updated_at = $3, avatar = $5 WHERE id = $4`,
-		u.Username, u.Role, u.UpdatedAt, u.ID, u.Avatar)
+		`UPDATE users SET username = $1, role = $2, updated_at = $3, avatar = $5,
+		 last_name = $6, vehicle_plate = $7, phone = $8, first_name = $9 WHERE id = $4`,
+		u.Username, u.Role, u.UpdatedAt, u.ID, u.Avatar, u.LastName, u.VehiclePlate, u.Phone, u.FirstName)
 	if err != nil {
 		return translateError(err)
 	}

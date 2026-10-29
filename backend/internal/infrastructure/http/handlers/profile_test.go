@@ -37,12 +37,17 @@ func TestUpdateProfile(t *testing.T) {
 		authenticated bool
 		status        int
 	}{
-		{"no session", `{"username":"New name"}`, false, http.StatusUnauthorized},
-		{"save name and remove photo", `{"username":" New name ","avatar":""}`, true, http.StatusOK},
+		{"no session", `{"username":"new.name"}`, false, http.StatusUnauthorized},
+		{"save name and remove photo", `{"username":" new.name ","avatar":""}`, true, http.StatusOK},
 		{"invalid name", `{"username":"a"}`, true, http.StatusUnprocessableEntity},
+		{"username with spaces", `{"username":"New name"}`, true, http.StatusUnprocessableEntity},
+		{"invalid first name", `{"firstName":"Lucas1"}`, true, http.StatusUnprocessableEntity},
+		{"invalid last name", `{"lastName":"Lima!"}`, true, http.StatusUnprocessableEntity},
 		{"invalid photo", `{"avatar":"data:image/png;base64,YWJj"}`, true, http.StatusUnprocessableEntity},
 		{"cannot promote self", `{"role":"admin"}`, true, http.StatusBadRequest},
 		{"empty update", `{}`, true, http.StatusBadRequest},
+		{"invalid plate", `{"vehiclePlate":"AB-12"}`, true, http.StatusUnprocessableEntity},
+		{"invalid phone", `{"phone":"1234"}`, true, http.StatusUnprocessableEntity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := &user.User{ID: uuid.New(), Username: "Original", Role: user.RoleUser, PasswordHash: "secret hash", Avatar: "old photo"}
@@ -60,7 +65,7 @@ func TestUpdateProfile(t *testing.T) {
 				t.Fatal("mutated authenticated user")
 			}
 			if tc.status == http.StatusOK {
-				if repo.saved == nil || repo.saved.ID != original.ID || repo.saved.Username != "New name" || repo.saved.Avatar != "" || repo.saved.Role != user.RoleUser || repo.saved.PasswordHash != "secret hash" {
+				if repo.saved == nil || repo.saved.ID != original.ID || repo.saved.Username != "new.name" || repo.saved.Avatar != "" || repo.saved.Role != user.RoleUser || repo.saved.PasswordHash != "secret hash" {
 					t.Fatal("incorrect saved profile")
 				}
 				if strings.Contains(response.Body.String(), "secret hash") {
@@ -70,6 +75,46 @@ func TestUpdateProfile(t *testing.T) {
 				t.Fatal("saved invalid request")
 			}
 		})
+	}
+}
+
+func TestUpdateProfileContact(t *testing.T) {
+	original := &user.User{ID: uuid.New(), Username: "Original", Role: user.RoleUser}
+	repo := &profileRepo{}
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/profile",
+		strings.NewReader(`{"vehiclePlate":"abc-1d23","phone":"(11) 98765-4321"}`))
+	req = req.WithContext(middleware.WithUser(req.Context(), original))
+	response := httptest.NewRecorder()
+	NewUsersHandler(repo).UpdateProfile(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	if repo.saved.VehiclePlate != "ABC1D23" || repo.saved.Phone != "11987654321" || repo.saved.Username != "Original" {
+		t.Fatalf("incorrect saved contact: %+v", repo.saved)
+	}
+	if !strings.Contains(response.Body.String(), `"vehiclePlate":"ABC1D23"`) {
+		t.Fatalf("plate missing from response: %s", response.Body.String())
+	}
+}
+
+func TestUpdateProfileNames(t *testing.T) {
+	// Conta antiga com espaço no usuário: reenviar o mesmo nome continua
+	// funcionando.
+	original := &user.User{ID: uuid.New(), Username: "Nome Antigo", Role: user.RoleUser}
+	repo := &profileRepo{}
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/profile",
+		strings.NewReader(`{"username":"Nome Antigo","firstName":" Lucas ","lastName":"Lima"}`))
+	req = req.WithContext(middleware.WithUser(req.Context(), original))
+	response := httptest.NewRecorder()
+	NewUsersHandler(repo).UpdateProfile(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	if repo.saved.Username != "Nome Antigo" || repo.saved.FirstName != "Lucas" || repo.saved.LastName != "Lima" {
+		t.Fatalf("incorrect saved names: %+v", repo.saved)
+	}
+	if !strings.Contains(response.Body.String(), `"firstName":"Lucas"`) {
+		t.Fatalf("first name missing from response: %s", response.Body.String())
 	}
 }
 
