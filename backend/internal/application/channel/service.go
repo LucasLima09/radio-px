@@ -40,13 +40,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (domainchannel.Pub
 	return ch.Public(1), nil
 }
 
-func (s *Service) List(ctx context.Context) []domainchannel.Public {
+// List returns the channels visible to viewerID: every public channel and the
+// private ones the viewer already belongs to.
+func (s *Service) List(ctx context.Context, viewerID uuid.UUID) []domainchannel.Public {
 	channels, err := s.channels.List(ctx)
 	if err != nil {
 		return []domainchannel.Public{}
 	}
 	result := make([]domainchannel.Public, 0, len(channels))
 	for _, ch := range channels {
+		if !s.canSee(ctx, ch, viewerID) {
+			continue
+		}
 		count, _ := s.channels.CountMembers(ctx, ch.ID)
 		result = append(result, ch.Public(count))
 	}
@@ -62,6 +67,28 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (domainchannel.Public, 
 	return ch.Public(count), nil
 }
 
+// GetVisible is Get for a viewer: a private channel the viewer does not belong
+// to is reported as not found, so its existence is not revealed.
+func (s *Service) GetVisible(ctx context.Context, id, viewerID uuid.UUID) (domainchannel.Public, error) {
+	ch, err := s.channels.FindByID(ctx, id)
+	if err != nil {
+		return domainchannel.Public{}, err
+	}
+	if !s.canSee(ctx, ch, viewerID) {
+		return domainchannel.Public{}, domainchannel.ErrNotFound
+	}
+	count, _ := s.channels.CountMembers(ctx, id)
+	return ch.Public(count), nil
+}
+
+func (s *Service) canSee(ctx context.Context, ch *domainchannel.Channel, viewerID uuid.UUID) bool {
+	if !ch.IsPrivate || ch.OwnerID == viewerID {
+		return true
+	}
+	isMember, err := s.channels.IsMember(ctx, ch.ID, viewerID)
+	return err == nil && isMember
+}
+
 func (s *Service) Join(ctx context.Context, channelID, userID uuid.UUID) (domainchannel.Public, error) {
 	ch, err := s.channels.FindByID(ctx, channelID)
 	if err != nil {
@@ -73,6 +100,11 @@ func (s *Service) Join(ctx context.Context, channelID, userID uuid.UUID) (domain
 		return domainchannel.Public{}, err
 	}
 	if !isMember {
+		// There is no invite flow yet, so a private channel only keeps the
+		// members it already has.
+		if ch.IsPrivate && ch.OwnerID != userID {
+			return domainchannel.Public{}, domainchannel.ErrPrivateChannel
+		}
 		if err := s.channels.AddMember(ctx, channelID, userID); err != nil {
 			return domainchannel.Public{}, err
 		}

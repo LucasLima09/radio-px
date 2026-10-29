@@ -12,6 +12,7 @@ var (
 	ErrInvalidChannelName = errors.New("channel name must have at least 1 character")
 	ErrAlreadyMember      = errors.New("user is already a member of this channel")
 	ErrNotMember          = errors.New("user is not a member of this channel")
+	ErrPrivateChannel     = errors.New("private channel: only members can join")
 )
 
 type Channel struct {

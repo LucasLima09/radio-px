@@ -34,7 +34,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(httpmw.RequestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)
 	r.Use(httpmw.CORS)
 

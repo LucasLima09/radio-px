@@ -13,11 +13,14 @@ import (
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 )
 
-// outboundFrame is a single frame queued for a client: either a text (JSON
-// signaling) message or a binary chunk of an audio clip payload.
+// outboundFrame is a single entry queued for a client: either a text (JSON
+// signaling) message or a whole audio clip. A clip takes one slot and is
+// chunked only by writePump, so its metadata and payload always go out
+// together and contiguous.
 type outboundFrame struct {
 	Kind websocket.MessageType
 	Data []byte
+	Clip *Clip
 }
 
 const (
@@ -27,6 +30,16 @@ const (
 
 // clipPayloadChunk is the maximum binary frame size pushed to a client.
 const clipPayloadChunk = 32 << 10
+
+// minSendQueue is the smallest outbound queue per client. The queue must also
+// fit a full clip snapshot on join, see newClient.
+const minSendQueue = 256
+
+const (
+	pingInterval = 25 * time.Second
+	pingTimeout  = 10 * time.Second
+	writeTimeout = 10 * time.Second
+)
 
 // pendingClip assembles an audio clip being uploaded by the client over a
 // stream of binary frames.
@@ -51,14 +64,19 @@ type Client struct {
 	pending *pendingClip
 
 	closeOnce sync.Once
+	slowOnce  sync.Once
 }
 
 func newClient(room *Room, u *user.User, conn *websocket.Conn, locations location.Repository) *Client {
+	queueSize := minSendQueue
+	if room != nil && room.hub != nil && room.hub.maxClips+64 > queueSize {
+		queueSize = room.hub.maxClips + 64
+	}
 	return &Client{
 		room:      room,
 		user:      u,
 		locations: locations,
-		sendCh:    make(chan outboundFrame, 256),
+		sendCh:    make(chan outboundFrame, queueSize),
 		done:      make(chan struct{}),
 		conn:      conn,
 	}
@@ -76,32 +94,38 @@ func (c *Client) sendError(message string) {
 	c.send(outboundMessage{Type: msgError, Message: message})
 }
 
-// pushFrame enqueues a frame without blocking the read loop. A full queue
-// drops the frame (best effort under load).
+// pushFrame enqueues a frame without blocking the caller, which often holds
+// the room lock. A full queue means the client cannot keep up: silently
+// dropping frames would leave it with missing audio or stale presence, so the
+// connection is dropped instead. The app reconnects with last_heard_seq and
+// receives whatever it missed from the clip queue.
 func (c *Client) pushFrame(f outboundFrame) {
 	select {
 	case c.sendCh <- f:
 	default:
+		c.dropSlow()
 	}
 }
 
-// sendClip publishes a clip to this client: the clip_new metadata message
-// followed by the binary payload. If the metadata cannot be queued nothing is
-// sent, so a payload never arrives without its header.
-func (c *Client) sendClip(clip *Clip) {
-	meta, err := json.Marshal(outboundMessage{Type: msgClipNew, Clip: ptr(clip.info())})
-	if err != nil {
-		return
-	}
-	c.pushFrame(outboundFrame{Kind: frameText, Data: meta})
-	data := clip.Data
-	for off := 0; off < len(data); off += clipPayloadChunk {
-		end := off + clipPayloadChunk
-		if end > len(data) {
-			end = len(data)
+// dropSlow closes the connection of a client whose queue overflowed. It runs
+// the close in a goroutine because pushFrame may be called with the room lock
+// held, and close needs that lock to remove the client.
+func (c *Client) dropSlow() {
+	c.slowOnce.Do(func() {
+		slog.Warn("dropping slow websocket client", "user", c.user.Username)
+		if c.conn == nil {
+			return
 		}
-		c.pushFrame(outboundFrame{Kind: frameBinary, Data: data[off:end]})
-	}
+		go func() {
+			_ = c.conn.Close(websocket.StatusTryAgainLater, "client too slow")
+		}()
+	})
+}
+
+// sendClip publishes a clip to this client as a single queue entry; writePump
+// sends the clip_new metadata followed by the binary payload.
+func (c *Client) sendClip(clip *Clip) {
+	c.pushFrame(outboundFrame{Clip: clip})
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -220,10 +244,62 @@ func (c *Client) writePump() {
 		case <-c.done:
 			return
 		case f := <-c.sendCh:
-			writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := c.conn.Write(writeCtx, f.Kind, f.Data)
+			var err error
+			if f.Clip != nil {
+				err = c.writeClip(f.Clip)
+			} else {
+				err = c.write(f.Kind, f.Data)
+			}
+			if err != nil {
+				// Unblock readLoop so the client is removed from the room.
+				_ = c.conn.CloseNow()
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) write(kind websocket.MessageType, data []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	return c.conn.Write(ctx, kind, data)
+}
+
+// writeClip sends the clip_new metadata and then the payload in chunks.
+func (c *Client) writeClip(clip *Clip) error {
+	meta, err := json.Marshal(outboundMessage{Type: msgClipNew, Clip: ptr(clip.info())})
+	if err != nil {
+		return nil
+	}
+	if err := c.write(frameText, meta); err != nil {
+		return err
+	}
+	data := clip.Data
+	for off := 0; off < len(data); off += clipPayloadChunk {
+		end := min(off+clipPayloadChunk, len(data))
+		if err := c.write(frameBinary, data[off:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pingLoop detects dead connections (a phone that lost signal never sends a
+// close frame). Without it the member would stay online, with a stale marker
+// on the map, until the TCP connection times out.
+func (c *Client) pingLoop() {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+			err := c.conn.Ping(ctx)
 			cancel()
 			if err != nil {
+				_ = c.conn.CloseNow()
 				return
 			}
 		}

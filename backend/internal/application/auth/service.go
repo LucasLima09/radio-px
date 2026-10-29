@@ -127,8 +127,14 @@ func (s *Service) Refresh(ctx context.Context, raw string) (*Tokens, error) {
 		return nil, err
 	}
 
-	if err := s.tokens.Revoke(ctx, rt.ID); err != nil {
+	// The conditional revoke is what claims the token: if another refresh got
+	// there first, this one must fail instead of minting a second session.
+	revoked, err := s.tokens.Revoke(ctx, rt.ID)
+	if err != nil {
 		return nil, err
+	}
+	if !revoked {
+		return nil, ErrRevokedRefresh
 	}
 
 	return s.issueTokens(ctx, u)
@@ -140,7 +146,8 @@ func (s *Service) Logout(ctx context.Context, raw string) error {
 	if err != nil {
 		return nil
 	}
-	return s.tokens.Revoke(ctx, rt.ID)
+	_, err = s.tokens.Revoke(ctx, rt.ID)
+	return err
 }
 
 func (s *Service) issueTokens(ctx context.Context, u *user.User) (*Tokens, error) {

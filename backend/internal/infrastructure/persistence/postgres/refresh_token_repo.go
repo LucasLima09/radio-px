@@ -37,8 +37,11 @@ func (r *RefreshTokenRepository) FindByHash(ctx context.Context, tokenHash strin
 	return &t, nil
 }
 
-func (r *RefreshTokenRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx,
+func (r *RefreshTokenRepository) Revoke(ctx context.Context, id uuid.UUID) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, id)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }

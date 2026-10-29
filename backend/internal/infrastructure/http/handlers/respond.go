@@ -28,6 +28,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, user.ErrWeakPassword) ||
 		errors.Is(err, domainchannel.ErrInvalidChannelName):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, domainchannel.ErrPrivateChannel):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, auth.ErrInvalidRefresh):

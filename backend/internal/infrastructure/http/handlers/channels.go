@@ -69,19 +69,30 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
-	channels := h.service.List(r.Context())
+	u, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	channels := h.service.List(r.Context(), u.ID)
 	h.withOnline(channels)
 	writeJSON(w, http.StatusOK, channels)
 }
 
 func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
+	u, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id, err := uuid.Parse(chi.URLParam(r, "channelID"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid channel id")
 		return
 	}
 
-	ch, err := h.service.Get(r.Context(), id)
+	ch, err := h.service.GetVisible(r.Context(), id, u.ID)
 	if err != nil {
 		writeDomainError(w, err)
 		return

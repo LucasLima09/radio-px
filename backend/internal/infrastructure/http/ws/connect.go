@@ -125,6 +125,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.channelGate.RUnlock()
 
 	go client.writePump()
+	go client.pingLoop()
 	client.readLoop()
 }
 
