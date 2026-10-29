@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import logoUrl from '../../../assets/images/logoktm.png';
+
 import NavItem from './NavItem.vue';
 import { adminPages } from '@/router/routes';
 import { useAuthStore } from '@/stores/auth.store';
@@ -15,8 +17,8 @@ const username = computed(() => auth.user?.username);
 <template>
   <aside class="sidebar" :class="{ 'is-open': open }">
     <div class="sidebar-brand">
-      <div class="brand-symbol">PX</div>
-      <div><h1>Radio PX</h1><span>Central de administração</span></div>
+      <div class="brand-logo"><img :src="logoUrl" alt="KTM Indústria" /></div>
+      <span>Radio PX · Central de administração</span>
     </div>
     <div class="nav-caption">WORKSPACE</div>
     <nav class="sidebar-nav" aria-label="Navegação principal">
