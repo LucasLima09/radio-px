@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../di.dart';
+import '../../models/active_session.dart';
 import '../../routes.dart';
 import '../../theme/app_colors.dart';
 import '../widgets/page_heading.dart';
@@ -31,10 +32,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Preenche os campos com o que já ficou salvo no aparelho.
   Future<void> _restore() async {
-    await _controller!.restore();
+    final session = await _controller!.restore();
     if (!mounted) return;
     _serverCtrl.text = _controller!.serverUrl;
     _userCtrl.text = _controller!.username;
+    if (session != null) await _enter(session);
   }
 
   @override
@@ -54,6 +56,11 @@ class _LoginScreenState extends State<LoginScreen> {
       password: _passCtrl.text,
     );
     if (!mounted || session == null) return;
+    await _enter(session);
+  }
+
+  Future<void> _enter(ActiveSession session) async {
+    final controller = _controller!;
     // O aviso sobre a falta de permissão de localização precisa sobreviver à
     // troca de tela: quem mostra é o messenger do app, que fica acima do
     // navegador de rotas.

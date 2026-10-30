@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'app_controller.dart';
 import '../di.dart';
 import '../models/active_session.dart';
+import '../models/auth_session.dart';
 import '../services/api/api_client.dart';
 import '../services/api/api_exception.dart';
 import '../utils/validators.dart';
@@ -36,18 +37,42 @@ class AuthController extends AppController {
   String get serverUrl => _serverUrl;
   String get username => _username;
 
-  /// Recupera o servidor e o último usuário usados neste aparelho.
-  Future<void> restore() async {
+  /// Recupera o servidor e o último usuário usados neste aparelho e, quando
+  /// há uma sessão salva ainda renovável, devolve-a já ativa para o app
+  /// entrar sem pedir login. Devolve `null` quando é preciso logar.
+  Future<ActiveSession?> restore() async {
     try {
       _serverUrl = initialServerUrl ?? await deps.config.loadServerUrl();
       final saved = await deps.sessionStore.load();
       _username = saved?.user.username ?? '';
+      if (saved != null && initialServerUrl == null) {
+        return await _resume(saved);
+      }
     } catch (error) {
       _error = 'Não foi possível carregar as configurações: $error';
     } finally {
       _restoring = false;
       notify();
     }
+    return null;
+  }
+
+  /// Reaproveita a sessão salva, renovando o token de acesso se preciso. Só
+  /// a falha ao renovar manda o usuário para o login; a sessão salva continua
+  /// no disco até o logout.
+  Future<ActiveSession?> _resume(AuthSession saved) async {
+    final api = ApiClient(baseUrl: _serverUrl, sessionStore: deps.sessionStore)
+      ..setSession(saved);
+    try {
+      await api.ensureAccessToken();
+    } catch (_) {
+      return null;
+    }
+    if (!await _startBeacon()) {
+      _warning = 'Sem permissão de localização: o app não enviará sua '
+          'posição em segundo plano.';
+    }
+    return ActiveSession(api: api, user: saved.user);
   }
 
   void setServerUrl(String value) {
