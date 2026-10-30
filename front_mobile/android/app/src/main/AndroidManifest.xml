@@ -24,6 +24,9 @@
             android:foregroundServiceType="location|mediaPlayback"
             android:exported="false"
             android:stopWithTask="false" />
+        <meta-data
+            android:name="com.radiopx.NOTIFICATION_ICON"
+            android:resource="@drawable/ic_stat_ktm" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

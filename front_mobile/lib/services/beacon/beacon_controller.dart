@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -82,8 +83,12 @@ class BeaconController {
         ForegroundServiceTypes.location,
         ForegroundServiceTypes.mediaPlayback,
       ],
-      notificationTitle: 'Radio PX ativo',
-      notificationText: 'Recebendo áudio do canal e enviando a posição',
+      notificationTitle: 'Radio PX',
+      notificationText: 'Reproduzindo áudios em segundo plano',
+      notificationIcon: const NotificationIcon(
+        metaDataName: 'com.radiopx.NOTIFICATION_ICON',
+        backgroundColor: Color(0xFF45C3F3),
+      ),
       callback: beaconCallback,
     );
     return result is ServiceRequestSuccess;
