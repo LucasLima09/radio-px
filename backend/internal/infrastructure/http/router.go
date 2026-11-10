@@ -47,7 +47,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 	channelHandler := handlers.NewChannelHandler(deps.Channels, deps.WSHandler)
 	locationHandler := handlers.NewLocationHandler(deps.Locations)
 	usersHandler := handlers.NewUsersHandler(deps.Users)
-	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger)
+	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger, deps.AdminUserIDs)
 	r.Get("/admin", adminui.Serve)
 	r.Get("/admin/*", adminui.Serve)
 
@@ -63,6 +63,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 			r.Get("/locations", locationHandler.Latest)
 			r.Get("/locations/history", locationHandler.Log)
 			r.Get("/summary", adminHandler.Summary)
+			r.Get("/drivers", adminHandler.Drivers)
 			r.Get("/users-page", adminHandler.Users)
 			r.Get("/users", usersHandler.List)
 			r.Patch("/users/{userID}", usersHandler.Update)

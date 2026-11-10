@@ -88,6 +88,35 @@ func (r *AdminRepository) Channels(ctx context.Context, search string, page int)
 	return result, tx.Commit(ctx)
 }
 
+func (r *AdminRepository) Drivers(ctx context.Context, excluded []uuid.UUID) ([]admin.DriverRecord, error) {
+	if excluded == nil {
+		excluded = []uuid.UUID{}
+	}
+	rows, err := r.pool.Query(ctx, `SELECT u.id, u.username, u.first_name, u.last_name, u.vehicle_plate,
+		l.latitude, l.longitude, l.created_at
+		FROM users u
+		LEFT JOIN LATERAL (
+			SELECT latitude, longitude, created_at FROM locations
+			WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+		) l ON true
+		WHERE u.role <> 'admin' AND NOT (u.id = ANY($1))
+		ORDER BY u.username`, excluded)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []admin.DriverRecord{}
+	for rows.Next() {
+		var d admin.DriverRecord
+		if err := rows.Scan(&d.ID, &d.Username, &d.FirstName, &d.LastName, &d.VehiclePlate,
+			&d.Lat, &d.Lng, &d.ReportedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (r *AdminRepository) DeleteChannel(ctx context.Context, id uuid.UUID) error {
 	result, err := r.pool.Exec(ctx, `DELETE FROM channels WHERE id = $1`, id)
 	if err != nil {

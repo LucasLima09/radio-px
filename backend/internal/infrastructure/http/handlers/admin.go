@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -15,13 +16,22 @@ import (
 )
 
 type AdminHandler struct {
-	repo   admin.Repository
-	ws     *ws.Handler
-	logger *slog.Logger
+	repo     admin.Repository
+	ws       *ws.Handler
+	logger   *slog.Logger
+	adminIDs []uuid.UUID
 }
 
-func NewAdminHandler(repo admin.Repository, wsHandler *ws.Handler, logger *slog.Logger) *AdminHandler {
-	return &AdminHandler{repo: repo, ws: wsHandler, logger: logger}
+// NewAdminHandler takes the ADMIN_USER_IDS so those accounts are not counted
+// as drivers, like the ones with role=admin.
+func NewAdminHandler(repo admin.Repository, wsHandler *ws.Handler, logger *slog.Logger, adminUserIDs []string) *AdminHandler {
+	ids := make([]uuid.UUID, 0, len(adminUserIDs))
+	for _, value := range adminUserIDs {
+		if id, err := uuid.Parse(value); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return &AdminHandler{repo: repo, ws: wsHandler, logger: logger, adminIDs: ids}
 }
 
 func (h *AdminHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +51,17 @@ func (h *AdminHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Drivers reports every driver with an app status, for the overview page.
+func (h *AdminHandler) Drivers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	records, err := h.repo.Drivers(r.Context(), h.adminIDs)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, admin.BuildDriversOverview(records, h.ws.ConnectedUsers(), time.Now().UTC()))
 }
 
 func adminQuery(w http.ResponseWriter, r *http.Request) (string, int, bool) {

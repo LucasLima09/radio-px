@@ -41,4 +41,7 @@ type Repository interface {
 	Users(context.Context, string, int) (Page[User], error)
 	Channels(context.Context, string, int) (Page[Channel], error)
 	DeleteChannel(context.Context, uuid.UUID) error
+	// Drivers lists every non-admin account with its last reported position.
+	// excluded holds admins configured by ID (ADMIN_USER_IDS).
+	Drivers(ctx context.Context, excluded []uuid.UUID) ([]DriverRecord, error)
 }

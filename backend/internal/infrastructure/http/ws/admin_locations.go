@@ -16,6 +16,26 @@ type DriverLocation struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// ConnectedUsers maps each user with an active radio connection to the name of
+// a channel they are in.
+func (h *Handler) ConnectedUsers() map[uuid.UUID]string {
+	h.hub.mu.RLock()
+	rooms := make([]*Room, 0, len(h.hub.rooms))
+	for _, room := range h.hub.rooms {
+		rooms = append(rooms, room)
+	}
+	h.hub.mu.RUnlock()
+	connected := make(map[uuid.UUID]string)
+	for _, room := range rooms {
+		room.mu.RLock()
+		for client := range room.clients {
+			connected[client.user.ID] = room.name
+		}
+		room.mu.RUnlock()
+	}
+	return connected
+}
+
 // DriverLocations snapshots connected clients only, keeping the newest position
 // when one account is connected from multiple devices or channels.
 func (h *Handler) DriverLocations() []DriverLocation {
