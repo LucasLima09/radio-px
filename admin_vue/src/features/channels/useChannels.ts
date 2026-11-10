@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue';
 
 import { POLL_INTERVAL_MS } from '@/core/config';
+import { confirmDialog } from '@/composables/useConfirm';
 import { useFeedback } from '@/composables/useFeedback';
 import { usePolling } from '@/composables/usePolling';
 import { channelsService } from '@/services/channels.service';
@@ -42,7 +43,13 @@ export function useChannels() {
   }
 
   async function remove(channel: AdminChannel): Promise<void> {
-    if (!window.confirm(`Excluir o canal "${channel.name}"? Esta ação não pode ser desfeita.`)) return;
+    const confirmed = await confirmDialog({
+      title: 'Excluir canal',
+      message: `Excluir o canal "${channel.name}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     deletingId.value = channel.id;
     clear();
     try {

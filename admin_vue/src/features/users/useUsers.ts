@@ -1,5 +1,6 @@
 import { computed, onMounted, ref } from 'vue';
 
+import { confirmDialog } from '@/composables/useConfirm';
 import { useFeedback } from '@/composables/useFeedback';
 import { usersService, type UserPatch } from '@/services/users.service';
 import { useAuthStore } from '@/stores/auth.store';
@@ -68,9 +69,12 @@ export function useUsers() {
   }
 
   async function remove(u: PublicUser): Promise<void> {
-    const confirmed = window.confirm(
-      `Excluir o usuário "${u.username}"? Isso remove também os canais, posições e tokens dele. Esta ação não pode ser desfeita.`,
-    );
+    const confirmed = await confirmDialog({
+      title: 'Excluir usuário',
+      message: `Excluir o usuário "${u.username}"? Isso remove também os canais, posições e tokens dele. Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
     if (!confirmed) return;
     deletingId.value = u.id;
     clear();
