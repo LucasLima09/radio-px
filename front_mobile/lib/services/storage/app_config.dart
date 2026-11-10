@@ -8,6 +8,7 @@ class AppConfig {
   static const _serverKey = 'server_url';
   static const _compiledServerKey = 'compiled_server_url';
   static const _recordModeKey = 'record_mode';
+  static const _listenToSelfKey = 'listen_to_self';
 
   /// Endereço usado quando o usuário ainda não configurou nenhum.
   String get defaultServerUrl {
@@ -50,6 +51,17 @@ class AppConfig {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _recordModeKey, mode == RecordMode.tap ? 'tap' : 'hold');
+  }
+
+  /// Se o usuário quer ouvir os próprios áudios quando tocam na fila.
+  Future<bool> loadListenToSelf() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_listenToSelfKey) ?? true;
+  }
+
+  Future<void> saveListenToSelf(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_listenToSelfKey, value);
   }
 
   String _lastHeardKey(String channelId) => 'last_heard_$channelId';

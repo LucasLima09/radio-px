@@ -180,6 +180,64 @@ class _RoomScreenState extends State<RoomScreen> {
     });
   }
 
+  /// Aba de configurações da sala. Reage ao controller para os switches
+  /// refletirem a mudança na hora.
+  void _openSettings(RoomController controller) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(24, 20, 24, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Configurações',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              SwitchListTile(
+                title: const Text('Tocar para falar'),
+                subtitle: Text(
+                  controller.recordMode == RecordMode.tap
+                      ? 'Toque para começar e toque de novo para enviar'
+                      : 'Desligado: segure o botão para falar',
+                ),
+                value: controller.recordMode == RecordMode.tap,
+                onChanged: (_) => controller.toggleRecordMode(),
+              ),
+              SwitchListTile(
+                title: const Text('Ouvir meus áudios'),
+                subtitle: Text(
+                  controller.listenToSelf
+                      ? 'Seus áudios tocam para você na fila'
+                      : 'Seus áudios não tocam para você',
+                ),
+                value: controller.listenToSelf,
+                onChanged: controller.setListenToSelf,
+              ),
+              if (controller.state == RadioConnState.disconnected)
+                ListTile(
+                  leading: const Icon(Icons.refresh),
+                  title: const Text('Reconectar'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    controller.connect();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller!;
@@ -187,27 +245,10 @@ class _RoomScreenState extends State<RoomScreen> {
       appBar: AppBar(
         title: Text(widget.channel.name),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Opções',
-            onSelected: (value) {
-              if (value == 'mode') controller.toggleRecordMode();
-              if (value == 'reconnect') controller.connect();
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'mode',
-                child: Text(
-                  controller.recordMode == RecordMode.hold
-                      ? 'Mudar para toque'
-                      : 'Mudar para segurar',
-                ),
-              ),
-              if (controller.state == RadioConnState.disconnected)
-                const PopupMenuItem(
-                  value: 'reconnect',
-                  child: Text('Reconectar'),
-                ),
-            ],
+          IconButton(
+            tooltip: 'Configurações',
+            icon: const Icon(Icons.settings),
+            onPressed: () => _openSettings(controller),
           ),
         ],
       ),

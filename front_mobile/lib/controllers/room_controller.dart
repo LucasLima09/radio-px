@@ -41,7 +41,11 @@ class RoomController extends AppController {
       onNotice: _showNotice,
       onChanged: notify,
     );
-    _queue = PlaybackQueue(cursor: _cursor, onChanged: notify);
+    _queue = PlaybackQueue(
+      cursor: _cursor,
+      onChanged: notify,
+      shouldPlay: (clip) => _listenToSelf || clip.userId != user.id,
+    );
   }
 
   final ApiClient api;
@@ -55,6 +59,7 @@ class RoomController extends AppController {
   late final PlaybackQueue _queue;
 
   RecordMode _recordMode = RecordMode.hold;
+  bool _listenToSelf = true;
   bool _pttPressed = false;
   bool _startingRecording = false;
   bool _joining = false;
@@ -73,6 +78,7 @@ class RoomController extends AppController {
   int get pendingCount => _queue.pendingCount;
   AudioClip? get currentPlayback => _queue.currentPlayback;
   RecordMode get recordMode => _recordMode;
+  bool get listenToSelf => _listenToSelf;
   bool get isPttPressed => _pttPressed;
   bool get isJoining => _joining;
   String? get connectionError => _connectionError;
@@ -85,6 +91,7 @@ class RoomController extends AppController {
   /// Prepara a sala: modo de gravação e conexão.
   Future<void> init() async {
     _recordMode = await config.loadRecordMode();
+    _listenToSelf = await config.loadListenToSelf();
     notify();
     await connect();
   }
@@ -114,6 +121,15 @@ class RoomController extends AppController {
     _recordMode = next;
     notify();
     await config.saveRecordMode(next);
+  }
+
+  /// Liga ou desliga ouvir os próprios áudios. Vale também para o que já
+  /// está na fila.
+  Future<void> setListenToSelf(bool value) async {
+    if (_listenToSelf == value) return;
+    _listenToSelf = value;
+    notify();
+    await config.saveListenToSelf(value);
   }
 
   void toggleMap() {

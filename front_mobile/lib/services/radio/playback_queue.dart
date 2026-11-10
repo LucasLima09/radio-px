@@ -20,9 +20,17 @@ class QueuedAudio {
 /// Enquanto [isMuted] está ativo (durante a gravação) os clipes ficam
 /// na fila, sem tocar.
 class PlaybackQueue {
-  PlaybackQueue({required this.cursor, required this.onChanged});
+  PlaybackQueue({
+    required this.cursor,
+    required this.onChanged,
+    this.shouldPlay,
+  });
 
   final PlaybackCursor cursor;
+
+  /// Decide, na hora de tocar, se a fala deve ser ouvida. As que não devem
+  /// são descartadas e contam como ouvidas, para não voltarem na reconexão.
+  final bool Function(AudioClip clip)? shouldPlay;
   final void Function() onChanged;
 
   final List<QueuedAudio> _queue = [];
@@ -89,8 +97,21 @@ class PlaybackQueue {
 
   /// Toca a próxima fala da fila, se houver.
   void playNext() {
-    if (_muted || _playing || _queue.isEmpty) return;
-    final next = _queue.removeAt(0);
+    if (_muted || _playing) return;
+    QueuedAudio? next;
+    while (_queue.isNotEmpty) {
+      final candidate = _queue.removeAt(0);
+      if (shouldPlay == null || shouldPlay!(candidate.meta)) {
+        next = candidate;
+        break;
+      }
+      candidate.source.dispose();
+      unawaited(cursor.markHeard(candidate.meta.seq));
+    }
+    if (next == null) {
+      onChanged();
+      return;
+    }
     _current = next;
     _playing = true;
     onChanged();
