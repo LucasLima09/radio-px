@@ -38,3 +38,25 @@ export interface Page<T> {
   page: number;
   pageSize: number;
 }
+
+/** open: conectado a um canal; closed: fora do canal com GPS ativo; offline: sem sinal. */
+export type DriverStatus = 'open' | 'closed' | 'offline';
+
+export interface Driver {
+  id: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  vehiclePlate: string;
+  status: DriverStatus;
+  channel?: string;
+  lat?: number;
+  lng?: number;
+  lastSeenAt?: string;
+}
+
+export interface DriversOverview {
+  counts: { total: number; open: number; closed: number; offline: number };
+  drivers: Driver[];
+  beaconWindowSeconds: number;
+}

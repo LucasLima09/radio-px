@@ -3,21 +3,17 @@ import { ref } from 'vue';
 import { POLL_INTERVAL_MS } from '@/core/config';
 import { useFeedback } from '@/composables/useFeedback';
 import { usePolling } from '@/composables/usePolling';
-import { locationsService } from '@/services/locations.service';
-import { usersService } from '@/services/users.service';
-import type { LocationReport, PublicUser } from '@/types';
+import { driversService } from '@/services/drivers.service';
+import type { DriversOverview } from '@/types';
 
 export function useOverview() {
-  const users = ref<PublicUser[] | null>(null);
-  const locations = ref<LocationReport[] | null>(null);
+  const overview = ref<DriversOverview | null>(null);
   const updatedAt = ref<Date | null>(null);
   const { error, fail } = useFeedback();
 
   usePolling(async () => {
     try {
-      const [u, l] = await Promise.all([usersService.list(), locationsService.latest()]);
-      users.value = u;
-      locations.value = l;
+      overview.value = await driversService.overview();
       updatedAt.value = new Date();
       error.value = null;
     } catch (e) {
@@ -25,5 +21,5 @@ export function useOverview() {
     }
   }, POLL_INTERVAL_MS);
 
-  return { users, locations, updatedAt, error };
+  return { overview, updatedAt, error };
 }
