@@ -1,0 +1,1 @@
+import{h as r}from"./app-CWkOaiAI.js";const a={list(){return r.get("/api/v1/admin/users")},update(e,t){return r.patch(`/api/v1/admin/users/${e}`,t)},remove(e){return r.delete(`/api/v1/admin/users/${e}`)}};export{a as u};
