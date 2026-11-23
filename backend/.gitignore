@@ -2,6 +2,9 @@
 bin/
 tmp/
 
+# Painel embutido (gerado por `make web`)
+internal/infrastructure/http/adminui/dist/
+
 # Ambiente
 .env
 

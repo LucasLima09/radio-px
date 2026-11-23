@@ -26,8 +26,13 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, user.ErrInvalidUsername) ||
 		errors.Is(err, user.ErrWeakPassword) ||
-		errors.Is(err, domainchannel.ErrInvalidChannelName):
+		errors.Is(err, domainchannel.ErrInvalidChannelName) ||
+		errors.Is(err, domainchannel.ErrWeakPassword):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	// 403, not 401: the client treats 401 as an expired access token.
+	case errors.Is(err, domainchannel.ErrPasswordRequired) ||
+		errors.Is(err, domainchannel.ErrWrongPassword):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, auth.ErrInvalidRefresh):
@@ -38,7 +43,11 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnauthorized, "refresh token revoked")
 	case errors.Is(err, auth.ErrUsernameTaken) || errors.Is(err, user.ErrUsernameTaken):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, user.ErrInvalidRole):
+	case errors.Is(err, user.ErrInvalidRole) ||
+		errors.Is(err, user.ErrInvalidFirstName) ||
+		errors.Is(err, user.ErrInvalidLastName) ||
+		errors.Is(err, user.ErrInvalidPlate) ||
+		errors.Is(err, user.ErrInvalidPhone):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "internal server error")

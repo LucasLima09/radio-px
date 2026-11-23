@@ -3,15 +3,18 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/google/uuid"
 )
 
 type Config struct {
 	HTTPPort        string        `env:"HTTP_PORT" envDefault:"8080"`
 	DatabaseURL     string        `env:"DATABASE_URL"`
 	JWTSecret       string        `env:"JWT_SECRET"`
+	AdminUserIDs    []string      `env:"ADMIN_USER_IDS" envSeparator:","`
 	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL" envDefault:"15m"`
 	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"168h"`
 
@@ -32,6 +35,13 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.JWTSecret) < 16 {
 		return nil, fmt.Errorf("JWT_SECRET must have at least 16 characters")
+	}
+	for index, value := range cfg.AdminUserIDs {
+		id := strings.TrimSpace(value)
+		cfg.AdminUserIDs[index] = id
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, fmt.Errorf("ADMIN_USER_IDS must contain comma-separated UUIDs")
+		}
 	}
 	if cfg.ClipTTL <= 0 {
 		cfg.ClipTTL = 20 * time.Minute

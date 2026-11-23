@@ -109,20 +109,24 @@ func (r *memoryTokenRepo) FindByHash(_ context.Context, hash string) (*user.Refr
 	if !ok {
 		return nil, user.ErrNotFound
 	}
-	return t, nil
+	copied := *t
+	return &copied, nil
 }
 
-func (r *memoryTokenRepo) Revoke(_ context.Context, id uuid.UUID) error {
+func (r *memoryTokenRepo) Revoke(_ context.Context, id uuid.UUID) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.tokens {
 		if t.ID == id {
+			if t.RevokedAt != nil {
+				return false, nil
+			}
 			now := time.Now().UTC()
 			t.RevokedAt = &now
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func newTestService(t *testing.T) *Service {
@@ -135,12 +139,12 @@ func TestRegisterAndLogin(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t)
 
-	created, err := svc.Register(ctx, RegisterInput{Username: "lucas", Password: "secret123"})
+	created, err := svc.Register(ctx, RegisterInput{Username: "lucas", FirstName: "Lucas", LastName: " Lima ", Password: "secret123"})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if created.Username != "lucas" {
-		t.Fatalf("expected username lucas, got %s", created.Username)
+	if created.Username != "lucas" || created.FirstName != "Lucas" || created.LastName != "Lima" {
+		t.Fatalf("expected lucas (Lucas Lima), got %s (%s %s)", created.Username, created.FirstName, created.LastName)
 	}
 
 	tokens, err := svc.Login(ctx, "lucas", "secret123")
@@ -212,6 +216,47 @@ func TestRefreshRotationAndRevocation(t *testing.T) {
 	}
 	if third.RefreshToken == "" {
 		t.Fatal("expected a new refresh token")
+	}
+}
+
+func TestConcurrentRefreshOnlyOneWins(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t)
+
+	if _, err := svc.Register(ctx, RegisterInput{Username: "lucas", Password: "secret123"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	tokens, err := svc.Login(ctx, "lucas", "secret123")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	const attempts = 20
+	var wg sync.WaitGroup
+	results := make(chan error, attempts)
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.Refresh(ctx, tokens.RefreshToken)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	succeeded := 0
+	for err := range results {
+		switch err {
+		case nil:
+			succeeded++
+		case ErrRevokedRefresh:
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("expected exactly one refresh to succeed, got %d", succeeded)
 	}
 }
 
