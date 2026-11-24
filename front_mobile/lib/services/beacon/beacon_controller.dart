@@ -6,7 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'beacon_task.dart';
 
 /// Gerencia o serviço de foreground (mantém o app vivo em segundo plano para
-/// o RX continuar) e o beacon de localização sempre ativo.
+/// o RX continuar).
 class BeaconController {
   static bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -41,7 +41,8 @@ class BeaconController {
   }
 
   Future<void> _ensureNotificationPermission() async {
-    final permission = await FlutterForegroundTask.checkNotificationPermission();
+    final permission =
+        await FlutterForegroundTask.checkNotificationPermission();
     if (permission != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
@@ -60,8 +61,7 @@ class BeaconController {
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'radio_px_background',
         channelName: 'Radio PX em segundo plano',
-        channelDescription:
-            'Mantém o rádio recebendo áudio e enviando a posição',
+        channelDescription: 'Mantém o rádio recebendo áudio',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         onlyAlertOnce: true,
