@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../models/auth_session.dart';
 import '../../models/channel.dart';
+import '../../models/orbit_encounter.dart';
 import '../../models/public_user.dart';
 import '../storage/session_store.dart';
 import 'api_exception.dart';
@@ -197,10 +198,35 @@ class ApiClient {
     return Channel.fromJson(data as Map<String, dynamic>);
   }
 
-  /// Reporta a posição atual. Chamado pelo beacon em segundo plano; a resposta
-  /// é 204, sem corpo.
-  Future<void> sendLocation(double lat, double lng) async {
-    await _authed('POST', '/api/v1/locations', {'lat': lat, 'lng': lng});
+  /// Orbits ativos cadastrados no painel. O app reconhece cada um pelo nome
+  /// que ele anuncia no Bluetooth.
+  Future<List<RegisteredOrbit>> listOrbits() async {
+    final data = await _authed('GET', '/api/v1/orbits');
+    return (data as List)
+        .map((e) => RegisteredOrbit.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Reporta a posição atual no momento em que o app encontrou um Orbit
+  /// cadastrado. A localização só é aceita junto do encontro; um Orbit não
+  /// cadastrado ou inativo é recusado com 422. A resposta é 204, sem corpo.
+  /// [id] e [at] vêm do aparelho: o encontro pode ter ficado na fila sem
+  /// internet, e reenviar o mesmo [id] não duplica no servidor.
+  Future<void> reportOrbitEncounter({
+    required String id,
+    required DateTime at,
+    required double lat,
+    required double lng,
+    required String identifier,
+    int? rssi,
+  }) async {
+    await _authed('POST', '/api/v1/locations', {
+      'id': id,
+      'at': at.toUtc().toIso8601String(),
+      'lat': lat,
+      'lng': lng,
+      'orbit': {'identifier': identifier, 'rssi': ?rssi},
+    });
   }
 
   static const _timeout = Duration(seconds: 15);
