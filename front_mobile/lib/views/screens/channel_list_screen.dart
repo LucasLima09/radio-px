@@ -1,6 +1,10 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../controllers/channel_list_controller.dart';
+import '../../controllers/orbit_controller.dart';
+import '../../services/orbit/orbit_queue.dart';
 import '../../controllers/profile_controller.dart';
 import '../../di.dart';
 import '../../models/active_session.dart';
@@ -8,9 +12,10 @@ import '../../models/channel.dart';
 import '../../routes.dart';
 import '../../theme/app_colors.dart';
 import '../widgets/channel_dialogs.dart';
+import 'orbit_screen.dart';
 import 'profile_screen.dart';
 
-/// Tela principal: lista de canais e, na outra aba, o perfil.
+/// Tela principal: lista de canais, perfil e, na web, o encontro com o Orbit.
 class ChannelListScreen extends StatefulWidget {
   const ChannelListScreen({super.key, required this.session});
 
@@ -23,6 +28,10 @@ class ChannelListScreen extends StatefulWidget {
 class _ChannelListScreenState extends State<ChannelListScreen> {
   ChannelListController? _channels;
   ProfileController? _profile;
+
+  /// Só existe onde dá para escutar Bluetooth: web (por clique) e Linux
+  /// desktop (sempre ligado).
+  OrbitController? _orbit;
   int _tab = 0;
 
   @override
@@ -41,12 +50,24 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       onUserChanged: (user) => _channels!.updateUser(user),
     );
     _channels!.start();
+    if (kIsWeb ||
+        const [
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+          TargetPlatform.linux,
+        ].contains(defaultTargetPlatform)) {
+      _orbit = OrbitController(
+        api: widget.session.api,
+        queue: OrbitQueue(userId: widget.session.user.id),
+      )..start();
+    }
   }
 
   @override
   void dispose() {
     _channels?.dispose();
     _profile?.dispose();
+    _orbit?.dispose();
     super.dispose();
   }
 
@@ -123,23 +144,29 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final controller = _channels!;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tab == 0 ? 'Canais' : 'Meu perfil'),
+        title: Text(const ['Canais', 'Meu perfil', 'Orbit'][_tab]),
         actions: [TextButton(onPressed: _logout, child: const Text('Sair'))],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (tab) => setState(() => _tab = tab),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.radio_outlined),
             selectedIcon: Icon(Icons.radio),
             label: 'Canais',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Perfil',
           ),
+          if (_orbit != null)
+            const NavigationDestination(
+              icon: Icon(Icons.bluetooth_outlined),
+              selectedIcon: Icon(Icons.bluetooth),
+              label: 'Orbit',
+            ),
         ],
       ),
       floatingActionButton: _tab != 0
@@ -157,6 +184,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
             builder: (context, _) => _channelsBody(controller),
           ),
           ProfileScreen(controller: _profile!),
+          if (_orbit != null) OrbitScreen(controller: _orbit!),
         ],
       ),
     );
