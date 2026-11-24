@@ -1,10 +1,10 @@
 package handlers
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,39 +16,37 @@ import (
 type LocationHandler struct {
 	locations location.Repository
 	orbits    orbit.Repository
+	orbitKey  ed25519.PublicKey
 }
 
-func NewLocationHandler(locations location.Repository, orbits orbit.Repository) *LocationHandler {
-	return &LocationHandler{locations: locations, orbits: orbits}
-}
-
-type orbitRequest struct {
-	// Identifier é o nome que o Orbit anuncia no Bluetooth.
-	Identifier string `json:"identifier"`
-	RSSI       *int   `json:"rssi"`
+func NewLocationHandler(locations location.Repository, orbits orbit.Repository, orbitKey ed25519.PublicKey) *LocationHandler {
+	return &LocationHandler{locations: locations, orbits: orbits, orbitKey: orbitKey}
 }
 
 type reportLocationRequest struct {
 	// ID gerado pelo app para o encontro. Torna o envio idempotente: o app
 	// reenvia o que ficou na fila sem saber se a resposta anterior se perdeu.
-	ID    *uuid.UUID    `json:"id"`
-	Lat   float64       `json:"lat"`
-	Lng   float64       `json:"lng"`
-	Orbit *orbitRequest `json:"orbit"`
-	// At é a hora do encontro no aparelho (RFC 3339). Sem ela, vale a hora
+	ID *uuid.UUID `json:"id"`
+	// Signal são os 84 bytes assinados que o Orbit transmitiu, em base64.
+	Signal []byte `json:"signal"`
+	RSSI   *int   `json:"rssi"`
+	// At é a hora em que o app ouviu o sinal (RFC 3339). Sem ela, vale a hora
 	// de chegada.
 	At *time.Time `json:"at"`
 }
 
-// Report persiste a posição do usuário no momento em que o app encontrou um
-// Orbit cadastrado via Bluetooth. A localização só é aceita junto de um
-// encontro: sem orbit, responde 400; com um Orbit não cadastrado ou inativo,
-// 422. Fica fora de canal, por isso o channel_id é nil. Reenviar o mesmo id
-// responde 204 sem gravar de novo.
+// Report persiste o sinal de um Orbit repassado pelo app. Posição e hora vêm
+// do sinal; a assinatura é conferida aqui mesmo que o app já tenha conferido.
+// Um Orbit novo é criado sozinho; um desativado no painel é recusado. Reenviar
+// o mesmo id responde 204 sem gravar de novo.
 func (h *LocationHandler) Report(w http.ResponseWriter, r *http.Request) {
 	u, ok := middleware.UserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if len(h.orbitKey) == 0 {
+		writeError(w, http.StatusServiceUnavailable, "Servidor sem a chave dos Orbits (ORBIT_PUBLIC_KEY).")
 		return
 	}
 
@@ -57,18 +55,13 @@ func (h *LocationHandler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Orbit == nil {
-		writeError(w, http.StatusBadRequest, "orbit is required")
-		return
-	}
-
-	o, err := h.orbits.FindByIdentifier(r.Context(), strings.TrimSpace(req.Orbit.Identifier))
-	if errors.Is(err, orbit.ErrNotFound) || (err == nil && !o.Active) {
-		writeError(w, http.StatusUnprocessableEntity, "unknown orbit")
+	signal, err := orbit.OpenSignal(req.Signal, h.orbitKey)
+	if errors.Is(err, orbit.ErrInvalidSignal) {
+		writeError(w, http.StatusBadRequest, "Sinal de Orbit inválido.")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		writeError(w, http.StatusUnprocessableEntity, "Assinatura do Orbit inválida.")
 		return
 	}
 
@@ -76,13 +69,29 @@ func (h *LocationHandler) Report(w http.ResponseWriter, r *http.Request) {
 	if req.At != nil {
 		at = *req.At
 	}
-	loc, err := location.NewEncounter(u.ID, req.Lat, req.Lng, o, req.Orbit.RSSI, at)
+	err = location.ValidateEncounter(signal, req.RSSI, at)
 	if errors.Is(err, location.ErrInvalidTime) {
-		writeError(w, http.StatusBadRequest, "invalid encounter time")
+		writeError(w, http.StatusBadRequest, "Hora do sinal fora do limite.")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid location")
+		writeError(w, http.StatusBadRequest, "Localização inválida.")
+		return
+	}
+
+	o, err := h.orbits.Ensure(r.Context(), signal.Identifier())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !o.Active {
+		writeError(w, http.StatusUnprocessableEntity, "Orbit desativado no painel.")
+		return
+	}
+
+	loc, err := location.NewEncounter(u.ID, signal, o, req.RSSI, at)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Sinal de Orbit inválido.")
 		return
 	}
 	if req.ID != nil {

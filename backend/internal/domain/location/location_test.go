@@ -8,50 +8,60 @@ import (
 	"github.com/lucas/radio-px-backend/internal/domain/orbit"
 )
 
+func signalAt(at time.Time) orbit.Signal {
+	return orbit.Signal{At: at, Latitude: -23.5, Longitude: -46.6}
+}
+
 func TestNewEncounter(t *testing.T) {
-	o, _ := orbit.New("Orbit do Lucas", "ORBIT-LUCAS")
+	o := orbit.Discovered("A1B2C3D401020304")
 	rssi := -60
-	at := time.Now().Add(-2 * time.Hour)
-	loc, err := NewEncounter(uuid.New(), -23.5, -46.6, o, &rssi, at)
+	// Ficou 2 h na fila do app sem internet.
+	at := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	loc, err := NewEncounter(uuid.New(), signalAt(at), o, &rssi, at.Add(5*time.Second))
 	if err != nil {
 		t.Fatalf("NewEncounter: %v", err)
 	}
-	if *loc.OrbitID != o.ID || *loc.OrbitName != "Orbit do Lucas" || *loc.RSSI != -60 {
+	if *loc.OrbitID != o.ID || *loc.OrbitName != o.Name || *loc.RSSI != -60 {
 		t.Fatalf("unexpected orbit fields: %v %q %d", *loc.OrbitID, *loc.OrbitName, *loc.RSSI)
 	}
-	if !loc.CreatedAt.Equal(at.UTC()) {
-		t.Fatalf("created_at must be the encounter time, got %v", loc.CreatedAt)
+	if loc.Latitude != -23.5 || loc.Longitude != -46.6 || !loc.CreatedAt.Equal(at) {
+		t.Fatalf("position and time must come from the signal: %+v", loc)
 	}
 	if loc.ChannelID != nil {
 		t.Fatal("encounter must not reference a channel")
 	}
 
 	// O nome gravado é uma cópia: renomear o Orbit depois não altera o histórico.
-	_ = o.Rename("Outro nome", "ORBIT-LUCAS")
-	if *loc.OrbitName != "Orbit do Lucas" {
+	name := *loc.OrbitName
+	_ = o.Rename("Outro nome")
+	if *loc.OrbitName != name {
 		t.Fatalf("orbit name must be a snapshot, got %q", *loc.OrbitName)
 	}
 }
 
 func TestNewEncounterRejects(t *testing.T) {
-	o, _ := orbit.New("Orbit", "ORBIT")
+	o := orbit.Discovered("A1B2C3D401020304")
 	bad := 50
 	now := time.Now()
+	old := now.Add(-31 * 24 * time.Hour)
 	cases := []struct {
-		lat, lng float64
-		rssi     *int
-		at       time.Time
-		want     error
+		name       string
+		signal     orbit.Signal
+		rssi       *int
+		receivedAt time.Time
+		want       error
 	}{
-		{91, 0, nil, now, ErrInvalidCoord},
-		{0, -181, nil, now, ErrInvalidCoord},
-		{0, 0, &bad, now, ErrInvalidRSSI},
-		{0, 0, nil, now.Add(time.Hour), ErrInvalidTime},
-		{0, 0, nil, now.Add(-31 * 24 * time.Hour), ErrInvalidTime},
+		{"latitude", orbit.Signal{At: now, Latitude: 91}, nil, now, ErrInvalidCoord},
+		{"longitude", orbit.Signal{At: now, Longitude: -181}, nil, now, ErrInvalidCoord},
+		{"rssi", signalAt(now), &bad, now, ErrInvalidRSSI},
+		{"futuro", signalAt(now.Add(time.Hour)), nil, now.Add(time.Hour), ErrInvalidTime},
+		{"velho demais", signalAt(old), nil, old, ErrInvalidTime},
+		{"retransmitido", signalAt(now.Add(-3 * time.Minute)), nil, now, ErrInvalidTime},
+		{"retransmitido sem hora", signalAt(now.Add(-3 * time.Minute)), nil, time.Time{}, ErrInvalidTime},
 	}
 	for _, c := range cases {
-		if _, err := NewEncounter(uuid.New(), c.lat, c.lng, o, c.rssi, c.at); err != c.want {
-			t.Fatalf("NewEncounter(%v, %v) = %v, want %v", c.lat, c.lng, err, c.want)
+		if _, err := NewEncounter(uuid.New(), c.signal, o, c.rssi, c.receivedAt); err != c.want {
+			t.Fatalf("%s: got %v, want %v", c.name, err, c.want)
 		}
 	}
 }

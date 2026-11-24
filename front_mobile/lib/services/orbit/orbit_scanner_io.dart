@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:bluez/bluez.dart';
 
 import '../../models/orbit_encounter.dart';
+import 'orbit_decoder.dart';
 import 'orbit_scanner.dart';
 import 'orbit_scanner_mobile.dart';
 
@@ -14,10 +15,11 @@ OrbitScanner createOrbitScanner() =>
 /// Varredura contínua pelo BlueZ, o Bluetooth do Linux, via D-Bus. Não precisa
 /// de clique nem de permissão: começa no login e fica ligada.
 ///
-/// O BlueZ busca tanto BLE quanto Bluetooth clássico, e atualiza o RSSI de
-/// cada aparelho a cada anúncio recebido; cada atualização vira um
-/// [OrbitSighting] quando o nome bate com um Orbit cadastrado.
+/// O BlueZ atualiza o RSSI e os dados de cada aparelho a cada anúncio recebido;
+/// cada atualização vira um [OrbitAdvertisement].
 class _BlueZOrbitScanner implements OrbitScanner {
+  static const _companyId = BlueZManufacturerId(OrbitDecoder.companyId);
+
   /// Se a busca parar (adaptador desligado e religado, outro programa
   /// encerrou a busca), ela é religada nesse intervalo.
   static const _watchdog = Duration(seconds: 10);
@@ -29,11 +31,8 @@ class _BlueZOrbitScanner implements OrbitScanner {
   bool get canWatch => Platform.isLinux;
 
   @override
-  bool get needsUserGesture => false;
-
-  @override
-  Stream<OrbitSighting> watch(List<RegisteredOrbit> orbits) {
-    late final StreamController<OrbitSighting> controller;
+  Stream<OrbitAdvertisement> watch() {
+    late final StreamController<OrbitAdvertisement> controller;
     final client = BlueZClient();
     final subs = <StreamSubscription<Object?>>[];
     final deviceSubs = <BlueZDevice, StreamSubscription<List<String>>>{};
@@ -41,22 +40,21 @@ class _BlueZOrbitScanner implements OrbitScanner {
     BlueZAdapter? adapter;
 
     void check(BlueZDevice device) {
-      final orbit = matchOrbit(
-        orbits,
-        device.name.isNotEmpty ? device.name : device.alias,
-      );
-      if (orbit == null) return;
       // RSSI 0 = o BlueZ conhece o aparelho, mas não o ouviu nesta busca.
       final rssi = device.rssi;
       if (rssi == 0) return;
       controller.add(
-        OrbitSighting(orbit: orbit, rssi: rssi, at: DateTime.now()),
+        OrbitAdvertisement(
+          data: device.manufacturerData[_companyId] ?? const [],
+          rssi: rssi,
+          at: DateTime.now(),
+        ),
       );
     }
 
     void track(BlueZDevice device) {
       deviceSubs[device] ??= device.propertiesChanged.listen((changed) {
-        if (changed.contains('RSSI') || changed.contains('Name')) {
+        if (changed.contains('RSSI') || changed.contains('ManufacturerData')) {
           check(device);
         }
       });
@@ -94,7 +92,7 @@ class _BlueZOrbitScanner implements OrbitScanner {
       try {
         // DuplicateData: o BlueZ repassa cada anúncio repetido, mantendo o
         // RSSI atualizado enquanto o Orbit estiver por perto.
-        await adapter!.setDiscoveryFilter(duplicateData: true);
+        await adapter!.setDiscoveryFilter(transport: 'le', duplicateData: true);
       } catch (_) {}
 
       client.devices.forEach(track);
@@ -120,13 +118,10 @@ class _BlueZOrbitScanner implements OrbitScanner {
       await client.close();
     }
 
-    controller = StreamController<OrbitSighting>(
+    controller = StreamController<OrbitAdvertisement>(
       onListen: start,
       onCancel: stop,
     );
     return controller.stream;
   }
-
-  @override
-  Future<OrbitSighting?> scanOnce(List<RegisteredOrbit> orbits) async => null;
 }

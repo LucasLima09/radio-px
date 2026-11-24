@@ -7,18 +7,15 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound  = errors.New("orbit not found")
-	ErrDuplicate = errors.New("orbit identifier already registered")
-)
+var ErrNotFound = errors.New("orbit not found")
 
 type Repository interface {
-	// List devolve os Orbits por nome; com activeOnly, só os ativos.
-	List(ctx context.Context, activeOnly bool) ([]Orbit, error)
+	// List devolve os Orbits por nome, com a última posição de cada um.
+	List(ctx context.Context) ([]Orbit, error)
 	Get(ctx context.Context, id uuid.UUID) (*Orbit, error)
-	// FindByIdentifier procura pelo nome anunciado no Bluetooth.
-	FindByIdentifier(ctx context.Context, identifier string) (*Orbit, error)
-	Create(ctx context.Context, o *Orbit) error
+	// Ensure devolve o Orbit com esse identificador, criando-o se for a
+	// primeira vez que aparece.
+	Ensure(ctx context.Context, identifier string) (*Orbit, error)
 	Update(ctx context.Context, o *Orbit) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }

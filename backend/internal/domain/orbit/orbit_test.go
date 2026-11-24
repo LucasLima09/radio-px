@@ -1,32 +1,21 @@
 package orbit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestNew(t *testing.T) {
-	o, err := New("  Orbit do Lucas ", " ORBIT-LUCAS ")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if o.Name != "Orbit do Lucas" || o.Identifier != "ORBIT-LUCAS" || !o.Active {
+func TestDiscoveredAndRename(t *testing.T) {
+	o := Discovered("A1B2C3D401020304")
+	if o.Name != "Orbit A1B2C3D401020304" || o.Identifier != "A1B2C3D401020304" || !o.Active {
 		t.Fatalf("unexpected orbit: %+v", o)
 	}
-}
-
-func TestNewRejects(t *testing.T) {
-	long := "0123456789012345678901234567890123456789012345678901234567890123456789"
-	cases := []struct {
-		name, identifier string
-		want             error
-	}{
-		{"", "ORBIT", ErrInvalidName},
-		{long, "ORBIT", ErrInvalidName},
-		{"Orbit", "  ", ErrInvalidIdentifier},
-		{"Orbit", long, ErrInvalidIdentifier},
-		{"Orbit", "ORB\nIT", ErrInvalidIdentifier},
+	if err := o.Rename("  Caminhão 12 "); err != nil || o.Name != "Caminhão 12" {
+		t.Fatalf("Rename: %v, %q", err, o.Name)
 	}
-	for _, c := range cases {
-		if _, err := New(c.name, c.identifier); err != c.want {
-			t.Fatalf("New(%q, %q) = %v, want %v", c.name, c.identifier, err, c.want)
+	for _, name := range []string{"", "   ", strings.Repeat("a", 65)} {
+		if err := o.Rename(name); err != ErrInvalidName {
+			t.Fatalf("Rename(%q) = %v", name, err)
 		}
 	}
 }

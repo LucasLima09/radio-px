@@ -26,14 +26,16 @@ export interface LocationReport {
   reportedAt: string;
 }
 
-/** Orbit cadastrado: reconhecido pelos apps via Bluetooth pelo identificador. */
+/** Orbit descoberto: criado sozinho no primeiro sinal assinado válido. */
 export interface Orbit {
   id: string;
   name: string;
-  /** Nome que o dispositivo anuncia no Bluetooth. */
+  /** Id do dispositivo, vindo do sinal assinado. */
   identifier: string;
   active: boolean;
   createdAt: string;
+  /** Última posição recebida (ausente se nenhum sinal chegou). */
+  last?: { lat: number; lng: number; at: string };
 }
 
 export interface AdminChannel {

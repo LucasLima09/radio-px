@@ -1,6 +1,7 @@
 package http
 
 import (
+	"crypto/ed25519"
 	"log/slog"
 	"net/http"
 
@@ -24,6 +25,7 @@ type Dependencies struct {
 	TokenManager *jwt.Manager
 	Locations    location.Repository
 	Orbits       orbit.Repository
+	OrbitKey     ed25519.PublicKey
 	Users        user.Repository
 	AuthService  *authapp.Service
 	Channels     *channelapp.Service
@@ -47,8 +49,8 @@ func NewRouter(deps Dependencies) *chi.Mux {
 
 	authHandler := handlers.NewAuthHandler(deps.AuthService)
 	channelHandler := handlers.NewChannelHandler(deps.Channels, deps.WSHandler)
-	locationHandler := handlers.NewLocationHandler(deps.Locations, deps.Orbits)
-	orbitHandler := handlers.NewOrbitHandler(deps.Orbits)
+	locationHandler := handlers.NewLocationHandler(deps.Locations, deps.Orbits, deps.OrbitKey)
+	orbitHandler := handlers.NewOrbitHandler(deps.Orbits, deps.OrbitKey)
 	usersHandler := handlers.NewUsersHandler(deps.Users)
 	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger, deps.AdminUserIDs)
 	r.Get("/admin", adminui.Serve)
@@ -58,7 +60,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/profile", usersHandler.Profile)
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Patch("/profile", usersHandler.UpdateProfile)
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Post("/locations", locationHandler.Report)
-		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/orbits", orbitHandler.ListActive)
+		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/orbits", orbitHandler.Config)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(httpmw.Authenticate(deps.TokenManager, deps.Users))
 			r.Use(httpmw.RequireAdmin(deps.AdminUserIDs))
@@ -75,7 +77,6 @@ func NewRouter(deps Dependencies) *chi.Mux {
 			r.Get("/channels", adminHandler.Channels)
 			r.Delete("/channels/{channelID}", adminHandler.DeleteChannel)
 			r.Get("/orbits", orbitHandler.List)
-			r.Post("/orbits", orbitHandler.Create)
 			r.Patch("/orbits/{orbitID}", orbitHandler.Update)
 			r.Delete("/orbits/{orbitID}", orbitHandler.Delete)
 		})

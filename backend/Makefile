@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 
-.PHONY: help dev up down logs restart psql db-only migrate-up reset-db web build fmt vet clean
+.PHONY: help dev up down logs restart psql db-only migrate-up reset-db web build orbit-sim fmt vet clean
 
 ## Dev: builds, starts db + api with Air hot reload in foreground
 dev:
@@ -47,6 +47,10 @@ web:
 ## Build the binary locally
 build:
 	go build -o bin/radio-px ./cmd/server
+
+## Compila o simulador de Orbit (transmite por BLE, Linux)
+orbit-sim:
+	CGO_ENABLED=0 go build -o bin/orbit-sim ./cmd/orbit-sim
 
 ## Run gofmt and report files that need formatting
 fmt:

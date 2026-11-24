@@ -1,102 +1,113 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter/foundation.dart' show debugPrint, listEquals;
 
 import '../models/orbit_encounter.dart';
 import '../services/api/api_client.dart';
 import '../services/api/api_exception.dart';
+import '../services/orbit/orbit_decoder.dart';
+import '../services/orbit/orbit_key_store.dart';
 import '../services/orbit/orbit_queue.dart';
 import '../services/orbit/orbit_scanner.dart';
 import 'app_controller.dart';
 
-/// Lê a posição atual do aparelho como (lat, lng).
-typedef PositionReader = Future<(double, double)> Function();
-
 /// Controller do encontro com os Orbits.
 ///
-/// Os Orbits são cadastrados uma vez no painel admin; o app baixa a lista e
-/// reconhece qualquer um deles pelo nome que anuncia no Bluetooth. A
-/// localização só vai para a central quando há um encontro.
+/// O app escuta todo anúncio BLE em volta e só repassa à central os que têm a
+/// assinatura dos Orbits. Id, hora e localização vêm do próprio Orbit; nenhum
+/// precisa de cadastro.
 class OrbitController extends AppController {
   OrbitController({
     required this.api,
     required this.queue,
     OrbitScanner? scanner,
-    PositionReader? readPosition,
+    OrbitKeyStore? keyStore,
   }) : scanner = scanner ?? createOrbitScanner(),
-       _readPosition = readPosition ?? _currentPosition;
+       _keyStore = keyStore ?? OrbitKeyStore(baseUrl: api.baseUrl);
 
   final ApiClient api;
   final OrbitScanner scanner;
 
   /// Encontros ainda não entregues, salvos no aparelho.
   final OrbitQueue queue;
-  final PositionReader _readPosition;
+  final OrbitKeyStore _keyStore;
 
   /// Abaixo disso o sinal é fraco demais para contar como "passou perto".
   static const rssiThreshold = -80;
 
-  /// Cada Orbit anuncia várias vezes por segundo; sem esse intervalo, cada
-  /// anúncio viraria um envio. Vale por Orbit: dois Orbits diferentes podem
-  /// gerar envios no mesmo minuto.
+  /// Intervalo mínimo entre dois envios do mesmo Orbit. Dois Orbits diferentes
+  /// podem gerar envios no mesmo minuto.
   static const cooldown = Duration(seconds: 60);
 
   static const _maxHistory = 20;
 
-  /// Quando a detecção é automática, ela é religada depois de uma falha
-  /// (Bluetooth desligado, por exemplo) nesse intervalo.
+  /// A escuta é religada depois de uma falha (Bluetooth desligado, por
+  /// exemplo) nesse intervalo.
   static const retryDelay = Duration(seconds: 10);
 
-  /// A lista de Orbits é rebaixada nesse intervalo, para um Orbit cadastrado
-  /// no painel passar a valer sem reiniciar o app.
+  /// A chave e os nomes são rebaixados nesse intervalo.
   static const refreshInterval = Duration(minutes: 1);
 
   /// Com encontros na fila, tenta entregá-los nesse intervalo (a internet
   /// pode ter voltado).
   static const flushInterval = Duration(seconds: 30);
 
-  List<RegisteredOrbit>? _orbits;
-  StreamSubscription<OrbitSighting>? _watch;
+  /// Os anúncios chegam às dezenas por segundo; a tela não precisa disso tudo.
+  static const _notifyEvery = Duration(seconds: 1);
+
+  List<int>? _key;
+  OrbitDecoder? _decoder;
+  Map<String, String> _names = const {};
+  StreamSubscription<OrbitAdvertisement>? _watch;
   Timer? _retry;
   Timer? _refresh;
   Timer? _flushTimer;
+  Timer? _notifyTimer;
   List<OrbitEncounter> _pending = [];
   bool _flushing = false;
   bool _offline = false;
-  final Map<String, OrbitSighting> _lastSighting = {};
+  final Map<String, OrbitSighting> _sightings = {};
   final Map<String, DateTime> _lastSentAt = {};
-  final Set<String> _sending = {};
   bool _loading = false;
-  bool _scanning = false;
+  bool _ready = false;
+  int _heard = 0;
   String? _error;
   final List<OrbitEncounter> _encounters = [];
 
   bool get isSupported => scanner.isSupported;
   bool get canWatch => scanner.canWatch;
 
-  /// A detecção liga sozinha e fica sempre ligada (sem botão).
-  bool get isAlwaysOn => canWatch && !scanner.needsUserGesture;
-
-  /// Orbits cadastrados; `null` enquanto carrega.
-  List<RegisteredOrbit>? get orbits => _orbits;
+  /// Já tentou carregar a chave dos Orbits.
+  bool get isReady => _ready;
   bool get isLoading => _loading;
   bool get isWatching => _watch != null;
-  bool get isScanning => _scanning;
-  bool get isSending => _sending.isNotEmpty;
+  bool get isSending => _flushing;
   String? get error => _error;
   List<OrbitEncounter> get encounters => List.unmodifiable(_encounters);
+
+  /// Anúncios BLE ouvidos, de qualquer aparelho.
+  int get heardCount => _heard;
+
+  /// Sinais com assinatura de Orbit válida.
+  int get validCount => _decoder?.valid ?? 0;
+
+  /// Sinais no formato dos Orbits com assinatura falsa ou fora da hora.
+  int get rejectedCount => _decoder?.rejected ?? 0;
+
+  /// Último sinal de cada Orbit ouvido nesta sessão, do mais recente ao mais
+  /// antigo.
+  List<OrbitSighting> get sightings =>
+      _sightings.values.toList()..sort((a, b) => b.at.compareTo(a.at));
 
   /// Encontros guardados esperando internet.
   int get pendingCount => _pending.length;
 
   /// A última tentativa de entrega falhou por falta de conexão.
   bool get isOffline => _offline;
-  OrbitSighting? lastSightingOf(RegisteredOrbit orbit) =>
-      _lastSighting[orbit.identifier];
 
-  /// Baixa a lista de Orbits cadastrados e, onde dá, liga a detecção.
+  String nameOf(OrbitSignal signal) =>
+      _names[signal.identifier] ?? 'Orbit ${signal.identifier}';
+
   Future<void> start() async {
     // A fila é entregue mesmo onde não há Bluetooth: pode ter sobrado de antes.
     _pending = await queue.load();
@@ -106,153 +117,116 @@ class OrbitController extends AppController {
     _flushTimer ??= Timer.periodic(flushInterval, (_) => flush());
     unawaited(flush());
     if (!isSupported) return;
+    // Com a chave salva a escuta começa já, mesmo sem internet.
+    final saved = await _keyStore.load();
+    if (saved != null) _useKey(saved);
     await load();
+    if (isDisposed) return;
     _refresh ??= Timer.periodic(refreshInterval, (_) => load(silent: true));
   }
 
-  /// Recarrega a lista. Em modo [silent] (atualização periódica) uma falha
-  /// mantém a lista atual sem mostrar erro.
+  /// Baixa a chave pública e os nomes. Em modo [silent] (atualização
+  /// periódica) uma falha mantém o que já havia sem mostrar erro.
   Future<void> load({bool silent = false}) async {
     if (_loading) return;
     _loading = true;
     if (!silent) _error = null;
     notify();
     try {
-      final orbits = await api.listOrbits();
-      final changed = !_sameOrbits(_orbits, orbits);
-      _orbits = orbits;
-      // A escuta filtra pela lista antiga; reinicia para pegar a nova.
-      if (changed && _watch != null) {
-        _cancelWatch();
-        startWatching();
+      final config = await api.orbitConfig();
+      if (isDisposed) return;
+      _names = config.names;
+      if (config.publicKey.isEmpty) {
+        if (_key == null) {
+          _error = 'O servidor está sem a chave dos Orbits (ORBIT_PUBLIC_KEY).';
+        }
+      } else {
+        await _keyStore.save(config.publicKey);
+        _useKey(config.publicKey);
       }
-      if (isAlwaysOn && _watch == null) startWatching();
     } catch (error) {
-      _orbits ??= const [];
-      if (!silent) _error = 'Falha ao carregar os Orbits: $error';
+      // Com a chave salva a detecção funciona sem internet.
+      if (!silent && _key == null) {
+        _error = 'Falha ao carregar a chave dos Orbits: $error';
+      }
     } finally {
       _loading = false;
+      _ready = true;
       notify();
     }
   }
 
-  static bool _sameOrbits(List<RegisteredOrbit>? a, List<RegisteredOrbit> b) {
-    if (a == null || a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i].identifier != b[i].identifier) return false;
+  void _useKey(List<int> key) {
+    if (isDisposed) return;
+    if (!listEquals(key, _key)) {
+      _key = key;
+      _decoder = OrbitDecoder(key);
+      _sightings.clear();
     }
-    return true;
+    _error = null;
+    _startWatching();
   }
 
-  /// Começa a escutar os Orbits cadastrados. Precisa vir de um clique.
-  void startWatching() {
-    final orbits = _orbits;
-    if (orbits == null || orbits.isEmpty || _watch != null || !canWatch) {
-      return;
-    }
+  void _startWatching() {
+    if (_decoder == null || _watch != null || !canWatch || isDisposed) return;
     _retry?.cancel();
     _retry = null;
-    _error = null;
-    _watch = scanner
-        .watch(orbits)
-        .listen(
-          _onSighting,
-          onError: (Object error) {
-            debugPrint('[Orbit] detecção falhou: $error');
-            _error = error.toString();
-            _cancelWatch();
-            if (isAlwaysOn && !isDisposed) {
-              _retry = Timer(retryDelay, startWatching);
-            }
+    _watch = scanner.watch().listen(
+      _onAdvertisement,
+      onError: (Object error) {
+        debugPrint('[Orbit] detecção falhou: $error');
+        _error = error.toString();
+        _watch?.cancel();
+        _watch = null;
+        if (!isDisposed) {
+          _retry = Timer(retryDelay, () {
+            _error = null;
+            _startWatching();
             notify();
-          },
-        );
+          });
+        }
+        notify();
+      },
+    );
     notify();
   }
 
-  void stopWatching() {
-    _cancelWatch();
-    notify();
-  }
+  Future<void> _onAdvertisement(OrbitAdvertisement ad) async {
+    _heard++;
+    _scheduleNotify();
+    final sighting = await _decoder?.add(ad);
+    if (sighting == null || isDisposed) return;
 
-  void _cancelWatch() {
-    _watch?.cancel();
-    _watch = null;
-  }
-
-  /// Modo manual: o seletor do navegador mostra só os Orbits cadastrados por
-  /// perto; escolher um conta como encontro.
-  Future<void> scanOnce() async {
-    final orbits = _orbits;
-    if (_scanning || orbits == null || orbits.isEmpty) return;
-    _scanning = true;
-    _error = null;
-    notify();
-    try {
-      final sighting = await scanner.scanOnce(orbits);
-      if (sighting != null) {
-        _lastSighting[sighting.orbit.identifier] = sighting;
-        await _report(sighting);
-      }
-    } on OrbitException catch (error) {
-      _error = error.message;
-    } finally {
-      _scanning = false;
-      notify();
-    }
-  }
-
-  void _onSighting(OrbitSighting sighting) {
-    final key = sighting.orbit.identifier;
-    _lastSighting[key] = sighting;
-    notify();
+    final key = sighting.signal.identifier;
+    _sightings[key] = sighting;
     final rssi = sighting.rssi;
     if (rssi != null && rssi < rssiThreshold) return;
     final last = _lastSentAt[key];
     if (last != null && sighting.at.difference(last) < cooldown) return;
-    _report(sighting);
+    _lastSentAt[key] = sighting.at;
+    await _report(sighting);
   }
 
-  /// Registra o encontro: lê a posição, guarda na fila do aparelho e tenta
-  /// entregar. Sem internet, ele espera na fila com a hora do encontro.
-  Future<void> _report(OrbitSighting sighting) async {
-    final orbit = sighting.orbit;
-    final key = orbit.identifier;
-    if (!_sending.add(key)) return;
-    // Marca antes de terminar para que os anúncios que chegam durante a
-    // leitura da posição não disparem outro.
-    _lastSentAt[key] = sighting.at;
-    notify();
-    try {
-      final (lat, lng) = await _readPosition();
-      final encounter = OrbitEncounter(
-        id: newEncounterId(),
-        orbit: orbit,
-        at: sighting.at,
-        rssi: sighting.rssi,
-        lat: lat,
-        lng: lng,
-      );
-      _pending.add(encounter);
-      await queue.save(_pending);
-      _record(encounter);
-    } catch (error) {
-      // Sem posição não há o que guardar; libera o próximo anúncio.
-      _lastSentAt.remove(key);
-      _record(
-        OrbitEncounter(
-          id: newEncounterId(),
-          orbit: orbit,
-          at: sighting.at,
-          rssi: sighting.rssi,
-          status: EncounterStatus.failed,
-          error: 'Sem localização: $error',
-        ),
-      );
-    } finally {
-      _sending.remove(key);
+  void _scheduleNotify() {
+    _notifyTimer ??= Timer(_notifyEvery, () {
+      _notifyTimer = null;
       notify();
-    }
+    });
+  }
+
+  /// Guarda o encontro na fila do aparelho e tenta entregar. Sem internet, ele
+  /// espera na fila.
+  Future<void> _report(OrbitSighting sighting) async {
+    final encounter = OrbitEncounter(
+      id: newEncounterId(),
+      signal: sighting.signal,
+      at: sighting.at,
+      rssi: sighting.rssi,
+    );
+    _pending.add(encounter);
+    _record(encounter);
+    await queue.save(_pending);
+    notify();
     await flush();
   }
 
@@ -262,20 +236,14 @@ class OrbitController extends AppController {
   Future<void> flush() async {
     if (_flushing || _pending.isEmpty) return;
     _flushing = true;
+    notify();
     try {
       while (_pending.isNotEmpty && !isDisposed) {
         final e = _pending.first;
         EncounterStatus result;
         String? failure;
         try {
-          await api.reportOrbitEncounter(
-            id: e.id,
-            at: e.at,
-            lat: e.lat!,
-            lng: e.lng!,
-            identifier: e.orbit.identifier,
-            rssi: e.rssi,
-          );
+          await api.reportOrbitEncounter(e);
           result = EncounterStatus.sent;
         } on ApiException catch (error) {
           if (!_isPermanent(error.statusCode)) {
@@ -283,9 +251,7 @@ class OrbitController extends AppController {
             break;
           }
           result = EncounterStatus.failed;
-          failure = error.statusCode == 422
-              ? 'Orbit não cadastrado ou desativado no painel'
-              : error.message;
+          failure = error.message;
         } catch (_) {
           // Sem internet (ou servidor fora do ar): fica na fila.
           _offline = true;
@@ -325,48 +291,13 @@ class OrbitController extends AppController {
     if (_encounters.length > _maxHistory) _encounters.removeLast();
   }
 
-  static const _simLat = String.fromEnvironment(
-    'SIM_LAT',
-    defaultValue: '-28.4507437',
-  );
-  static const _simLng = String.fromEnvironment(
-    'SIM_LNG',
-    defaultValue: '-52.199568',
-  );
-
-  static Future<(double, double)> _currentPosition() async {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
-      return (double.parse(_simLat), double.parse(_simLng));
-    }
-    return _devicePosition(timeLimit: const Duration(seconds: 20));
-  }
-
-  static Future<(double, double)> _devicePosition({
-    required Duration timeLimit,
-  }) async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      throw Exception('Permissão de localização negada');
-    }
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: timeLimit,
-      ),
-    );
-    return (position.latitude, position.longitude);
-  }
-
   @override
   void dispose() {
     _retry?.cancel();
     _refresh?.cancel();
     _flushTimer?.cancel();
-    _cancelWatch();
+    _notifyTimer?.cancel();
+    _watch?.cancel();
     super.dispose();
   }
 }

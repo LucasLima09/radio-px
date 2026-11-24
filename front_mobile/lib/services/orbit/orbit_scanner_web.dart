@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:web/web.dart' as web;
 
 import '../../models/orbit_encounter.dart';
+import 'orbit_decoder.dart';
 import 'orbit_scanner.dart';
 
 OrbitScanner createOrbitScanner() => _WebOrbitScanner();
@@ -13,12 +15,7 @@ OrbitScanner createOrbitScanner() => _WebOrbitScanner();
 // Bindings mínimos da Web Bluetooth API: o package:web não traz essa spec.
 
 extension type _Bluetooth._(JSObject _) implements web.EventTarget {
-  external JSPromise<_BluetoothDevice> requestDevice(JSObject options);
   external JSPromise<_LEScan> requestLEScan(JSObject options);
-}
-
-extension type _BluetoothDevice._(JSObject _) implements JSObject {
-  external String? get name;
 }
 
 extension type _LEScan._(JSObject _) implements JSObject {
@@ -26,9 +23,12 @@ extension type _LEScan._(JSObject _) implements JSObject {
 }
 
 extension type _AdvertisementEvent._(JSObject _) implements web.Event {
-  external _BluetoothDevice get device;
-  external String? get name;
   external int? get rssi;
+  external _ManufacturerData get manufacturerData;
+}
+
+extension type _ManufacturerData._(JSObject _) implements JSObject {
+  external JSDataView? get(int companyId);
 }
 
 const _advertisementEvent = 'advertisementreceived';
@@ -53,45 +53,39 @@ class _WebOrbitScanner implements OrbitScanner {
   @override
   bool get canWatch => _bluetooth?.has('requestLEScan') ?? false;
 
-  // O Chrome só libera a busca dentro de uma interação do usuário, mas não
-  // precisa ser um botão: a busca começa no primeiro toque/tecla em qualquer
-  // lugar do app (ver [watch]).
   @override
-  bool get needsUserGesture => false;
-
-  @override
-  Stream<OrbitSighting> watch(List<RegisteredOrbit> orbits) {
-    late final StreamController<OrbitSighting> controller;
+  Stream<OrbitAdvertisement> watch() {
+    late final StreamController<OrbitAdvertisement> controller;
     _Bluetooth? bluetooth;
     JSFunction? listener;
     _LEScan? scan;
 
     void handle(web.Event event) {
       final ad = event as _AdvertisementEvent;
-      final orbit = matchOrbit(orbits, ad.name ?? ad.device.name);
-      if (orbit == null) return;
+      final data = ad.manufacturerData.get(OrbitDecoder.companyId)?.toDart;
       controller.add(
-        OrbitSighting(orbit: orbit, rssi: ad.rssi, at: DateTime.now()),
+        OrbitAdvertisement(
+          data: data == null
+              ? const []
+              : Uint8List.fromList(Uint8List.sublistView(data)),
+          rssi: ad.rssi,
+          at: DateTime.now(),
+        ),
       );
     }
 
     Future<void> beginScan() async {
       try {
-        if (orbits.isEmpty) throw OrbitException('Nenhum Orbit cadastrado');
         bluetooth = _require();
         _prompting = true;
         final n = ++_requests;
         debugPrint('[Orbit] pedindo busca #$n');
         listener = handle.toJS;
         bluetooth!.addEventListener(_advertisementEvent, listener);
-        // Filtra pelo nome anunciado, o que sobrevive à troca periódica de
-        // endereço Bluetooth do aparelho.
         scan = await bluetooth!
             .requestLEScan(
               {
-                    'filters': [
-                      for (final o in orbits) {'name': o.identifier},
-                    ],
+                    'acceptAllAdvertisements': true,
                     'keepRepeatedDevices': true,
                   }.jsify()
                   as JSObject,
@@ -145,37 +139,11 @@ class _WebOrbitScanner implements OrbitScanner {
       } catch (_) {}
     }
 
-    controller = StreamController<OrbitSighting>(
+    controller = StreamController<OrbitAdvertisement>(
       onListen: start,
       onCancel: stop,
     );
     return controller.stream;
-  }
-
-  @override
-  Future<OrbitSighting?> scanOnce(List<RegisteredOrbit> orbits) async {
-    if (orbits.isEmpty) throw OrbitException('Nenhum Orbit cadastrado');
-    final bluetooth = _require();
-    final _BluetoothDevice device;
-    try {
-      device = await bluetooth
-          .requestDevice(
-            {
-                  'filters': [
-                    for (final o in orbits) {'name': o.identifier},
-                  ],
-                }.jsify()
-                as JSObject,
-          )
-          .toDart;
-    } catch (error) {
-      // O usuário fechou o seletor sem escolher.
-      if (error.toString().contains('NotFoundError')) return null;
-      throw OrbitException(_describe(error));
-    }
-    final orbit = matchOrbit(orbits, device.name);
-    if (orbit == null) return null;
-    return OrbitSighting(orbit: orbit, at: DateTime.now());
   }
 
   _Bluetooth _require() {

@@ -15,7 +15,7 @@ import '../widgets/channel_dialogs.dart';
 import 'orbit_screen.dart';
 import 'profile_screen.dart';
 
-/// Tela principal: lista de canais, perfil e, na web, o encontro com o Orbit.
+/// Tela principal: lista de canais, perfil e encontros com os Orbits.
 class ChannelListScreen extends StatefulWidget {
   const ChannelListScreen({super.key, required this.session});
 
@@ -29,8 +29,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   ChannelListController? _channels;
   ProfileController? _profile;
 
-  /// Só existe onde dá para escutar Bluetooth: web (por clique) e Linux
-  /// desktop (sempre ligado).
+  /// Só existe onde dá para escutar Bluetooth.
   OrbitController? _orbit;
   int _tab = 0;
 

@@ -43,10 +43,25 @@ O mapa usa a biblioteca Leaflet empacotada pelo próprio bundle do painel; as im
 do mapa vêm do OpenStreetMap e exigem conexão com a internet. A licença está em
 `admin_vue/public/LEAFLET-LICENSE.txt` (servida em `/admin/LEAFLET-LICENSE.txt`).
 
-O aplicativo envia GPS ao entrar em um canal, com permissão de localização: ao se
-mover cerca de 10 metros e a cada 30 segundos quando parado. O mapa mostra
-somente conexões que enviaram posição; ao desconectar, o marcador sai. Posições
-sem atualização recente aparecem em vermelho.
+A posição vem do Orbit, não do celular: ele transmite por BLE um sinal assinado
+com id, hora e localização; o app de quem passa perto confere a assinatura e
+repassa à central, que confere de novo. Posições sem atualização recente aparecem
+em vermelho.
+
+## Orbits
+
+Não há cadastro: o primeiro sinal válido cria o Orbit. Na tela **Orbits** dá para
+renomear e desativar (um Orbit excluído reaparece se voltar a transmitir).
+
+A central precisa da chave pública dos Orbits em `ORBIT_PUBLIC_KEY`. A chave
+privada fica só nos Orbits. Para simular um no Linux:
+
+```sh
+make orbit-sim
+./bin/orbit-sim                          # mostra a chave pública e transmite
+./bin/orbit-sim -lat -28.45 -lng -52.19  # em outra posição
+./bin/orbit-sim -forge                   # assinatura falsa: o app deve ignorar
+```
 
 ## Autorizar uma conta
 

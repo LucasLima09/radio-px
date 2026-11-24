@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/google/uuid"
+	"github.com/lucas/radio-px-backend/internal/domain/orbit"
 )
 
 type Config struct {
@@ -17,6 +19,10 @@ type Config struct {
 	AdminUserIDs    []string      `env:"ADMIN_USER_IDS" envSeparator:","`
 	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL" envDefault:"15m"`
 	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"168h"`
+
+	// Chave pública Ed25519 (base64) que confere a assinatura dos Orbits.
+	OrbitPublicKey string            `env:"ORBIT_PUBLIC_KEY"`
+	OrbitKey       ed25519.PublicKey `env:"-"`
 
 	// Clip queue cache (in-memory, no persistence).
 	ClipTTL           time.Duration `env:"CLIP_TTL" envDefault:"20m"`
@@ -42,6 +48,13 @@ func Load() (*Config, error) {
 		if _, err := uuid.Parse(id); err != nil {
 			return nil, fmt.Errorf("ADMIN_USER_IDS must contain comma-separated UUIDs")
 		}
+	}
+	if cfg.OrbitPublicKey != "" {
+		key, err := orbit.ParsePublicKey(cfg.OrbitPublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("ORBIT_PUBLIC_KEY must be a base64 Ed25519 public key")
+		}
+		cfg.OrbitKey = key
 	}
 	if cfg.ClipTTL <= 0 {
 		cfg.ClipTTL = 20 * time.Minute

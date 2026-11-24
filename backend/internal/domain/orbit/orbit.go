@@ -1,5 +1,5 @@
-// Package orbit modela os dispositivos Orbit: cadastrados uma vez no painel e
-// reconhecidos pelos apps via Bluetooth pelo nome que anunciam.
+// Package orbit modela os dispositivos Orbit: transmitem um sinal BLE assinado
+// com id e localização. Não há cadastro: o primeiro sinal válido cria o Orbit.
 package orbit
 
 import (
@@ -11,44 +11,45 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrInvalidName       = errors.New("invalid orbit name")
-	ErrInvalidIdentifier = errors.New("invalid orbit identifier")
-)
+var ErrInvalidName = errors.New("invalid orbit name")
 
-const maxField = 64
+const maxName = 64
 
 type Orbit struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
-	// Identifier é o nome que o dispositivo anuncia no Bluetooth (local name).
-	// É por ele que o app reconhece o Orbit, então precisa ser exato.
-	Identifier string    `json:"identifier"`
-	Active     bool      `json:"active"`
-	CreatedAt  time.Time `json:"createdAt"`
+	// Identifier é o id do dispositivo que vem no sinal assinado.
+	Identifier string `json:"identifier"`
+	// Active falso bloqueia o Orbit: seus sinais são recusados.
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"createdAt"`
+	// Última posição recebida; nula se nenhum sinal chegou ainda.
+	Last *LastSignal `json:"last,omitempty"`
 }
 
-func New(name, identifier string) (*Orbit, error) {
-	o := &Orbit{ID: uuid.New(), Active: true, CreatedAt: time.Now().UTC()}
-	if err := o.Rename(name, identifier); err != nil {
-		return nil, err
+type LastSignal struct {
+	Latitude  float64   `json:"lat"`
+	Longitude float64   `json:"lng"`
+	At        time.Time `json:"at"`
+}
+
+// Discovered monta o Orbit visto pela primeira vez, com um nome provisório que
+// o admin pode trocar no painel.
+func Discovered(identifier string) *Orbit {
+	return &Orbit{
+		ID:         uuid.New(),
+		Name:       "Orbit " + identifier,
+		Identifier: identifier,
+		Active:     true,
+		CreatedAt:  time.Now().UTC(),
 	}
-	return o, nil
 }
 
-// Rename troca nome e identificador, validando os dois.
-func (o *Orbit) Rename(name, identifier string) error {
+func (o *Orbit) Rename(name string) error {
 	name = strings.TrimSpace(name)
-	identifier = strings.TrimSpace(identifier)
-	if name == "" || utf8.RuneCountInString(name) > maxField {
+	if name == "" || utf8.RuneCountInString(name) > maxName {
 		return ErrInvalidName
 	}
-	// O nome anunciado no BLE é curto (até ~29 bytes no anúncio) e não tem
-	// quebras de linha; 64 dá folga para o nome completo do GAP.
-	if identifier == "" || len(identifier) > maxField || strings.ContainsAny(identifier, "\r\n\t") {
-		return ErrInvalidIdentifier
-	}
 	o.Name = name
-	o.Identifier = identifier
 	return nil
 }

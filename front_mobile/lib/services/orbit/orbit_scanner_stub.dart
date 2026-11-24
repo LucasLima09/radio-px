@@ -11,12 +11,6 @@ class _UnsupportedOrbitScanner implements OrbitScanner {
   bool get canWatch => false;
 
   @override
-  bool get needsUserGesture => true;
-
-  @override
-  Stream<OrbitSighting> watch(List<RegisteredOrbit> orbits) =>
+  Stream<OrbitAdvertisement> watch() =>
       Stream.error(OrbitException('Bluetooth indisponível nesta plataforma'));
-
-  @override
-  Future<OrbitSighting?> scanOnce(List<RegisteredOrbit> orbits) async => null;
 }

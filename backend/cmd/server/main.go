@@ -26,6 +26,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if len(cfg.OrbitKey) == 0 {
+		logger.Warn("ORBIT_PUBLIC_KEY not set: orbit signals will be rejected")
+	}
+
 	ctx := context.Background()
 
 	if err := postgres.RunMigrations(cfg.DatabaseURL); err != nil {
@@ -59,6 +63,7 @@ func main() {
 		Users:        userRepo,
 		Locations:    locationRepo,
 		Orbits:       postgres.NewOrbitRepository(pool),
+		OrbitKey:     cfg.OrbitKey,
 		AuthService:  authService,
 		Channels:     channelService,
 		WSHandler:    wsHandler,

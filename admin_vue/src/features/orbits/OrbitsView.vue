@@ -7,23 +7,23 @@ import { formatDateTime } from '@/utils/format';
 import { useOrbits } from './useOrbits';
 
 const {
-  orbits, loaded, busyId, creating, form, editingId, draft, error, success,
-  load, create, startEdit, cancelEdit, saveEdit, toggleActive, remove,
+  orbits, loaded, busyId, editingId, draft, error, success,
+  load, startEdit, cancelEdit, saveEdit, toggleActive, remove,
 } = useOrbits();
 
 const columns = [
   { label: 'Nome' },
-  { label: 'Identificador Bluetooth' },
+  { label: 'Id' },
   { label: 'Status' },
-  { label: 'Cadastrado em' },
+  { label: 'Última posição' },
+  { label: 'Último sinal' },
   { label: 'Ações', class: 'actions-col' },
 ];
 const meta = computed(() => `${orbits.value.length} Orbit(s)${loaded.value ? '' : ' · carregando...'}`);
 const emptyText = computed(() => {
   if (orbits.value.length > 0 || error.value) return null;
-  return loaded.value ? 'Nenhum Orbit cadastrado.' : 'Carregando...';
+  return loaded.value ? 'Nenhum Orbit encontrado ainda. Eles aparecem aqui no primeiro sinal válido.' : 'Carregando...';
 });
-const canCreate = computed(() => form.name.trim() !== '' && form.identifier.trim() !== '' && !creating.value);
 </script>
 
 <template>
@@ -32,34 +32,16 @@ const canCreate = computed(() => form.name.trim() !== '' && form.identifier.trim
       <button class="ghost" @click="load">Atualizar</button>
     </PageHeader>
 
-    <form class="filters" @submit.prevent="create">
-      <label>
-        Nome
-        <input v-model="form.name" maxlength="64" placeholder="Orbit do caminhão 12" />
-      </label>
-      <label title="Nome exato que o dispositivo anuncia no Bluetooth">
-        Identificador Bluetooth
-        <input v-model="form.identifier" maxlength="64" placeholder="ORBIT-12" />
-      </label>
-      <button class="primary" type="submit" :disabled="!canCreate">
-        {{ creating ? 'Cadastrando...' : 'Cadastrar Orbit' }}
-      </button>
-    </form>
-
     <DataTable :columns="columns" :empty-text="emptyText">
       <tr v-for="o in orbits" :key="o.id">
-        <template v-if="editingId === o.id">
-          <td><input v-model="draft.name" class="inline-input" maxlength="64" /></td>
-          <td><input v-model="draft.identifier" class="inline-input mono" maxlength="64" /></td>
-        </template>
-        <template v-else>
-          <td class="cell-user">{{ o.name }}</td>
-          <td class="mono">{{ o.identifier }}</td>
-        </template>
+        <td v-if="editingId === o.id"><input v-model="draft" class="inline-input" maxlength="64" /></td>
+        <td v-else class="cell-user">{{ o.name }}</td>
+        <td class="mono">{{ o.identifier }}</td>
         <td>
           <span class="badge" :class="o.active ? 'badge-live' : 'badge-off'">{{ o.active ? 'Ativo' : 'Inativo' }}</span>
         </td>
-        <td class="muted">{{ formatDateTime(o.createdAt) }}</td>
+        <td class="mono">{{ o.last ? `${o.last.lat.toFixed(5)}, ${o.last.lng.toFixed(5)}` : '—' }}</td>
+        <td class="muted">{{ o.last ? formatDateTime(o.last.at) : '—' }}</td>
         <td class="actions-col">
           <div class="inline-actions">
             <template v-if="editingId === o.id">

@@ -24,10 +24,20 @@ class OrbitQueue {
     try {
       return [
         for (final item in jsonDecode(raw) as List)
-          OrbitEncounter.fromJson(item as Map<String, dynamic>),
+          ?_parse(item as Map<String, dynamic>),
       ];
     } catch (_) {
       return [];
+    }
+  }
+
+  /// Um item ilegível (ex.: formato de uma versão antiga do app) é descartado
+  /// sem perder os outros.
+  static OrbitEncounter? _parse(Map<String, dynamic> json) {
+    try {
+      return OrbitEncounter.fromJson(json);
+    } catch (_) {
+      return null;
     }
   }
 

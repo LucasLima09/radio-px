@@ -5,8 +5,8 @@ import '../../controllers/orbit_controller.dart';
 import '../../models/orbit_encounter.dart';
 import '../../theme/app_colors.dart';
 
-/// Encontro com os Orbits via Bluetooth. A lista vem do painel admin: aqui só
-/// se liga a detecção e se acompanham os envios.
+/// Encontro com os Orbits via Bluetooth. A detecção é automática: aqui só se
+/// acompanha o que foi ouvido e enviado.
 class OrbitScreen extends StatelessWidget {
   const OrbitScreen({super.key, required this.controller});
 
@@ -46,55 +46,22 @@ class OrbitScreen extends StatelessWidget {
   }
 
   List<Widget> _content(BuildContext context) {
-    final orbits = controller.orbits;
-    final titleStyle = Theme.of(context).textTheme.titleMedium;
-    if (orbits == null) {
+    if (!controller.isReady && !controller.isWatching) {
       return const [Center(child: CircularProgressIndicator())];
     }
-    final hasOrbits = orbits.isNotEmpty;
+    final sightings = controller.sightings;
+    final titleStyle = Theme.of(context).textTheme.titleMedium;
     return [
       _StatusCard(controller: controller),
-      const SizedBox(height: 16),
-      if (controller.isAlwaysOn)
-        kIsWeb
-            ? const _Notice(
-                icon: Icons.info_outline,
-                text:
-                    'No navegador a busca começa no primeiro toque em qualquer '
-                    'lugar do app. Autorize o Bluetooth quando o Chrome pedir.',
-              )
-            : const SizedBox.shrink()
-      else if (controller.canWatch)
-        FilledButton.icon(
-          onPressed: !hasOrbits
-              ? null
-              : controller.isWatching
-              ? controller.stopWatching
-              : controller.startWatching,
-          icon: Icon(
-            controller.isWatching ? Icons.pause : Icons.bluetooth_searching,
-          ),
-          label: Text(
-            controller.isWatching ? 'Parar detecção' : 'Ativar detecção',
-          ),
-        )
-      else ...[
-        FilledButton.icon(
-          onPressed: !hasOrbits || controller.isScanning
-              ? null
-              : controller.scanOnce,
-          icon: const Icon(Icons.bluetooth_searching),
-          label: Text(
-            controller.isScanning ? 'Procurando...' : 'Escanear Orbits',
-          ),
-        ),
+      if (kIsWeb) ...[
         const SizedBox(height: 16),
-        const _Notice(
+        _Notice(
           icon: Icons.info_outline,
-          text:
-              'Detecção automática indisponível: rode o Chrome com '
-              '--enable-experimental-web-platform-features. Até lá, cada '
-              '"Escanear" em que você escolhe um Orbit conta como um encontro.',
+          text: controller.canWatch
+              ? 'No navegador a busca começa no primeiro toque em qualquer '
+                    'lugar do app. Autorize o Bluetooth quando o Chrome pedir.'
+              : 'Detecção indisponível: rode o Chrome com '
+                    '--enable-experimental-web-platform-features.',
         ),
       ],
       if (controller.error != null) ...[
@@ -102,30 +69,24 @@ class OrbitScreen extends StatelessWidget {
         Text(controller.error!, style: const TextStyle(color: pxDanger)),
       ],
       const SizedBox(height: 32),
-      Row(
-        children: [
-          Expanded(child: Text('Orbits cadastrados', style: titleStyle)),
-          IconButton(
-            tooltip: 'Recarregar lista',
-            onPressed: controller.isLoading ? null : controller.load,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      if (!hasOrbits)
+      Text('Orbits por perto', style: titleStyle),
+      const SizedBox(height: 8),
+      if (sightings.isEmpty)
         const Text(
-          'Nenhum Orbit cadastrado. Peça ao admin para cadastrar no painel.',
+          'Nenhum Orbit ouvido nesta sessão.',
           style: TextStyle(color: pxMuted),
         )
       else
-        for (final o in orbits) _OrbitTile(controller: controller, orbit: o),
+        for (final s in sightings)
+          _OrbitTile(name: controller.nameOf(s.signal), sighting: s),
       const SizedBox(height: 32),
       Text('Envios recentes', style: titleStyle),
       const SizedBox(height: 8),
       if (controller.encounters.isEmpty)
         const Text('Nenhum encontro ainda.', style: TextStyle(color: pxMuted))
       else
-        for (final e in controller.encounters) _EncounterTile(encounter: e),
+        for (final e in controller.encounters)
+          _EncounterTile(name: controller.nameOf(e.signal), encounter: e),
     ];
   }
 }
@@ -173,14 +134,9 @@ class _StatusCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            _line(
-              'Modo',
-              controller.isAlwaysOn
-                  ? 'sempre ligado'
-                  : controller.canWatch
-                  ? 'automático (ativado por clique)'
-                  : 'manual (botão Escanear)',
-            ),
+            _line('Sinais BLE ouvidos', '${controller.heardCount}'),
+            _line('Assinatura válida', '${controller.validCount}'),
+            _line('Recusados', '${controller.rejectedCount}'),
             _line(
               'Regra',
               'sinal ≥ ${OrbitController.rssiThreshold} dBm, '
@@ -202,43 +158,35 @@ class _StatusCard extends StatelessWidget {
 }
 
 class _OrbitTile extends StatelessWidget {
-  const _OrbitTile({required this.controller, required this.orbit});
+  const _OrbitTile({required this.name, required this.sighting});
 
-  final OrbitController controller;
-  final RegisteredOrbit orbit;
+  final String name;
+  final OrbitSighting sighting;
 
   @override
   Widget build(BuildContext context) {
-    final sighting = controller.lastSightingOf(orbit);
-    final signal = sighting == null
-        ? 'sem sinal nesta sessão'
-        : 'último sinal ${_time(sighting.at)}'
-              '${sighting.rssi == null ? '' : ' · ${sighting.rssi} dBm'}';
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        Icons.sensors,
-        color: sighting == null ? pxMuted : pxOnline,
+      leading: const Icon(Icons.sensors, color: pxOnline),
+      title: Text(name),
+      subtitle: Text(
+        '${sighting.signal.identifier} · ${_coords(sighting.signal)}\n'
+        'último sinal ${_time(sighting.at)}${_dbm(sighting.rssi)}',
       ),
-      title: Text(orbit.name),
-      subtitle: Text('${orbit.identifier} · $signal'),
     );
   }
 }
 
 class _EncounterTile extends StatelessWidget {
-  const _EncounterTile({required this.encounter});
+  const _EncounterTile({required this.name, required this.encounter});
 
+  final String name;
   final OrbitEncounter encounter;
 
   @override
   Widget build(BuildContext context) {
     final e = encounter;
-    final coords = e.lat == null
-        ? ''
-        : ' · ${e.lat!.toStringAsFixed(5)}, ${e.lng!.toStringAsFixed(5)}';
-    final details =
-        '${_time(e.at)}$coords${e.rssi == null ? '' : ' · ${e.rssi} dBm'}';
+    final details = '${_time(e.at)} · ${_coords(e.signal)}${_dbm(e.rssi)}';
     final (icon, color, subtitle) = switch (e.status) {
       EncounterStatus.sent => (Icons.check_circle_outline, pxSuccess, details),
       EncounterStatus.queued => (
@@ -255,7 +203,7 @@ class _EncounterTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: color),
-      title: Text(e.orbit.name),
+      title: Text(name),
       subtitle: Text(subtitle),
     );
   }
@@ -297,7 +245,13 @@ Widget _line(String label, String value) => Padding(
   ),
 );
 
-String _time(DateTime at) {
+String _coords(OrbitSignal s) =>
+    '${s.lat.toStringAsFixed(5)}, ${s.lng.toStringAsFixed(5)}';
+
+String _dbm(int? rssi) => rssi == null ? '' : ' · $rssi dBm';
+
+String _time(DateTime utcOrLocal) {
+  final at = utcOrLocal.toLocal();
   String two(int v) => v.toString().padLeft(2, '0');
   return '${two(at.day)}/${two(at.month)} '
       '${two(at.hour)}:${two(at.minute)}:${two(at.second)}';
