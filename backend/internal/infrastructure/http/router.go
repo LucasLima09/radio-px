@@ -47,7 +47,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 
 	authHandler := handlers.NewAuthHandler(deps.AuthService)
 	channelHandler := handlers.NewChannelHandler(deps.Channels, deps.WSHandler)
-	locationHandler := handlers.NewLocationHandler(deps.Locations)
+	locationHandler := handlers.NewLocationHandler(deps.Locations, deps.Orbits)
 	orbitHandler := handlers.NewOrbitHandler(deps.Orbits)
 	usersHandler := handlers.NewUsersHandler(deps.Users)
 	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger, deps.AdminUserIDs)
