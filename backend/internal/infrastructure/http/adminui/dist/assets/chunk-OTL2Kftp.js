@@ -1,0 +1,1 @@
+import{L as o,M as t,r}from"./app-BC16nTf4.js";function f(){const u=r(null),n=r(null);function l(){u.value=null,n.value=null}function s(e,c){o(e)||(u.value=t(e,c))}function a(e){n.value=e}return{error:u,success:n,clear:l,fail:s,succeed:a}}export{f as u};
