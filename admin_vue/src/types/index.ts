@@ -19,7 +19,21 @@ export interface LocationReport {
   username: string;
   lat: number;
   lng: number;
+  /** Orbit encontrado via Bluetooth que gerou o report (ausente nas posições antigas de GPS). */
+  orbitName?: string;
+  /** Intensidade do sinal Bluetooth no encontro, em dBm. */
+  rssi?: number;
   reportedAt: string;
+}
+
+/** Orbit cadastrado: reconhecido pelos apps via Bluetooth pelo identificador. */
+export interface Orbit {
+  id: string;
+  name: string;
+  /** Nome que o dispositivo anuncia no Bluetooth. */
+  identifier: string;
+  active: boolean;
+  createdAt: string;
 }
 
 export interface AdminChannel {

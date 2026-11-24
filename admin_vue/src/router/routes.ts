@@ -18,6 +18,7 @@ export const adminPages: AdminPage[] = [
   { name: 'map', path: 'map', label: 'Mapa ao vivo', detail: 'Localização dos motoristas', icon: '◎', component: () => import('@/features/map/LiveMapView.vue') },
   { name: 'users', path: 'users', label: 'Usuários', detail: 'Contas e permissões', icon: '♙', component: () => import('@/features/users/UsersView.vue') },
   { name: 'channels', path: 'channels', label: 'Canais', detail: 'Canais e pessoas online', icon: '#', component: () => import('@/features/channels/ChannelsView.vue') },
+  { name: 'orbits', path: 'orbits', label: 'Orbits', detail: 'Dispositivos Bluetooth', icon: '⌬', component: () => import('@/features/orbits/OrbitsView.vue') },
   { name: 'log', path: 'log', label: 'Histórico de posições', detail: 'Registros e consultas', icon: '≡', component: () => import('@/features/location-log/LocationLogView.vue') },
 ];
 
