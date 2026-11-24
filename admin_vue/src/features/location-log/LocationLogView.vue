@@ -8,7 +8,14 @@ import { LIMIT_OPTIONS, useLocationLog } from './useLocationLog';
 
 const { history, users, filterUserId, limit, loaded, error, refresh } = useLocationLog();
 
-const columns = [{ label: 'Motorista' }, { label: 'Latitude' }, { label: 'Longitude' }, { label: 'Horário' }];
+const columns = [
+  { label: 'Motorista' },
+  { label: 'Orbit' },
+  { label: 'Latitude' },
+  { label: 'Longitude' },
+  { label: 'RSSI' },
+  { label: 'Horário' },
+];
 const meta = computed(() => `${history.value.length} registro(s)${loaded.value ? '' : ' · carregando...'}`);
 const emptyText = computed(() => {
   if (history.value.length > 0 || error.value) return null;
@@ -40,8 +47,10 @@ const emptyText = computed(() => {
     <DataTable :columns="columns" :empty-text="emptyText">
       <tr v-for="(r, i) in history" :key="`${r.userId}-${r.reportedAt}-${i}`">
         <td class="cell-user">{{ r.username }}</td>
+        <td :class="{ muted: !r.orbitName }">{{ r.orbitName ?? '—' }}</td>
         <td class="mono">{{ formatCoord(r.lat) }}</td>
         <td class="mono">{{ formatCoord(r.lng) }}</td>
+        <td class="mono muted">{{ r.rssi != null ? `${r.rssi} dBm` : '—' }}</td>
         <td class="muted">{{ formatDateTime(r.reportedAt) }}</td>
       </tr>
     </DataTable>

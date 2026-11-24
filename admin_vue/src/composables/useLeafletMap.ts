@@ -36,8 +36,14 @@ function popupContent(r: LocationReport, live: boolean): HTMLElement {
     document.createTextNode(`${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`),
     document.createElement('br'),
     document.createTextNode(formatDateTime(r.reportedAt)),
-    status,
   );
+  if (r.orbitName) {
+    popup.append(
+      document.createElement('br'),
+      document.createTextNode(`Orbit: ${r.orbitName}${r.rssi != null ? ` · ${r.rssi} dBm` : ''}`),
+    );
+  }
+  popup.append(status);
   return popup;
 }
 
