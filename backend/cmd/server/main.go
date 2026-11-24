@@ -58,6 +58,7 @@ func main() {
 		TokenManager: tokenManager,
 		Users:        userRepo,
 		Locations:    locationRepo,
+		Orbits:       postgres.NewOrbitRepository(pool),
 		AuthService:  authService,
 		Channels:     channelService,
 		WSHandler:    wsHandler,

@@ -10,6 +10,7 @@ import (
 	channelapp "github.com/lucas/radio-px-backend/internal/application/channel"
 	"github.com/lucas/radio-px-backend/internal/domain/admin"
 	"github.com/lucas/radio-px-backend/internal/domain/location"
+	"github.com/lucas/radio-px-backend/internal/domain/orbit"
 	"github.com/lucas/radio-px-backend/internal/domain/user"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/auth/jwt"
 	"github.com/lucas/radio-px-backend/internal/infrastructure/http/adminui"
@@ -22,6 +23,7 @@ type Dependencies struct {
 	Logger       *slog.Logger
 	TokenManager *jwt.Manager
 	Locations    location.Repository
+	Orbits       orbit.Repository
 	Users        user.Repository
 	AuthService  *authapp.Service
 	Channels     *channelapp.Service
@@ -46,6 +48,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 	authHandler := handlers.NewAuthHandler(deps.AuthService)
 	channelHandler := handlers.NewChannelHandler(deps.Channels, deps.WSHandler)
 	locationHandler := handlers.NewLocationHandler(deps.Locations)
+	orbitHandler := handlers.NewOrbitHandler(deps.Orbits)
 	usersHandler := handlers.NewUsersHandler(deps.Users)
 	adminHandler := handlers.NewAdminHandler(deps.Admin, deps.WSHandler, deps.Logger, deps.AdminUserIDs)
 	r.Get("/admin", adminui.Serve)
@@ -55,6 +58,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/profile", usersHandler.Profile)
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Patch("/profile", usersHandler.UpdateProfile)
 		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Post("/locations", locationHandler.Report)
+		r.With(httpmw.Authenticate(deps.TokenManager, deps.Users)).Get("/orbits", orbitHandler.ListActive)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(httpmw.Authenticate(deps.TokenManager, deps.Users))
 			r.Use(httpmw.RequireAdmin(deps.AdminUserIDs))
@@ -70,6 +74,10 @@ func NewRouter(deps Dependencies) *chi.Mux {
 			r.Delete("/users/{userID}", usersHandler.Delete)
 			r.Get("/channels", adminHandler.Channels)
 			r.Delete("/channels/{channelID}", adminHandler.DeleteChannel)
+			r.Get("/orbits", orbitHandler.List)
+			r.Post("/orbits", orbitHandler.Create)
+			r.Patch("/orbits/{orbitID}", orbitHandler.Update)
+			r.Delete("/orbits/{orbitID}", orbitHandler.Delete)
 		})
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", authHandler.Register)
