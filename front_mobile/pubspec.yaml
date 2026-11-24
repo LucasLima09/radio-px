@@ -46,7 +46,8 @@ dependencies:
   flutter_foreground_task: ^11.0.3
   wakelock_plus: ^1.8.0
   image_picker: ^1.2.1
-
+  bluez: ^0.8.3
+  flutter_blue_plus: ^2.3.15
 dev_dependencies:
   flutter_test:
     sdk: flutter

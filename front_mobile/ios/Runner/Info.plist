@@ -6,6 +6,8 @@
 	<string>Escolha uma foto da galeria para seu perfil no Radio PX.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Usamos o Bluetooth para detectar os Orbits por perto e registrar a sua posição no encontro.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Precisamos da sua localização para mostrar você e os outros membros do canal no mapa.</string>
 	<key>NSMicrophoneUsageDescription</key>
