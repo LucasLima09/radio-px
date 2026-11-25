@@ -40,6 +40,7 @@ class OrbitController extends AppController {
   static const cooldown = Duration(seconds: 60);
 
   static const _maxHistory = 20;
+  static const _maxLogs = 60;
 
   /// A escuta é religada depois de uma falha (Bluetooth desligado, por
   /// exemplo) nesse intervalo.
@@ -72,6 +73,9 @@ class OrbitController extends AppController {
   bool _ready = false;
   int _heard = 0;
   String? _error;
+  String? _sendError;
+  DateTime? _watchingSince;
+  final List<OrbitLog> _logs = [];
   final List<OrbitEncounter> _encounters = [];
 
   bool get isSupported => scanner.isSupported;
@@ -87,6 +91,36 @@ class OrbitController extends AppController {
 
   /// Anúncios BLE ouvidos, de qualquer aparelho.
   int get heardCount => _heard;
+
+  /// Anúncios no formato dos Orbits, ainda sem conferir a assinatura.
+  int get fragmentCount => _decoder?.fragmentCount ?? 0;
+
+  /// O app tem a chave pública que confere as assinaturas.
+  bool get hasKey => _key != null;
+
+  /// Motivo da última entrega que não deu certo.
+  String? get sendError => _sendError;
+
+  /// Escuta há um tempo e não ouviu nenhum aparelho: quase sempre é falta de
+  /// permissão de Bluetooth.
+  bool get isDeaf =>
+      _heard == 0 &&
+      _watchingSince != null &&
+      DateTime.now().difference(_watchingSince!) > const Duration(seconds: 15);
+
+  /// O que aconteceu na detecção, do mais recente ao mais antigo.
+  List<OrbitLog> get logs => List.unmodifiable(_logs);
+
+  void clearLogs() {
+    _logs.clear();
+    notify();
+  }
+
+  void _log(String message) {
+    _logs.insert(0, OrbitLog(DateTime.now(), message));
+    if (_logs.length > _maxLogs) _logs.removeLast();
+    _scheduleNotify();
+  }
 
   /// Sinais com assinatura de Orbit válida.
   int get validCount => _decoder?.valid ?? 0;
@@ -139,6 +173,7 @@ class OrbitController extends AppController {
       if (config.publicKey.isEmpty) {
         if (_key == null) {
           _error = 'O servidor está sem a chave dos Orbits (ORBIT_PUBLIC_KEY).';
+          if (!silent) _log(_error!);
         }
       } else {
         await _keyStore.save(config.publicKey);
@@ -148,6 +183,7 @@ class OrbitController extends AppController {
       // Com a chave salva a detecção funciona sem internet.
       if (!silent && _key == null) {
         _error = 'Falha ao carregar a chave dos Orbits: $error';
+        _log(_error!);
       }
     } finally {
       _loading = false;
@@ -160,7 +196,8 @@ class OrbitController extends AppController {
     if (isDisposed) return;
     if (!listEquals(key, _key)) {
       _key = key;
-      _decoder = OrbitDecoder(key);
+      _decoder = OrbitDecoder(key, onLog: _log);
+      _log('Chave dos Orbits carregada');
       _sightings.clear();
     }
     _error = null;
@@ -171,10 +208,14 @@ class OrbitController extends AppController {
     if (_decoder == null || _watch != null || !canWatch || isDisposed) return;
     _retry?.cancel();
     _retry = null;
+    _watchingSince = DateTime.now();
+    _log('Escuta Bluetooth iniciada');
     _watch = scanner.watch().listen(
       _onAdvertisement,
       onError: (Object error) {
         debugPrint('[Orbit] detecção falhou: $error');
+        _log('Detecção falhou: $error');
+        _watchingSince = null;
         _error = error.toString();
         _watch?.cancel();
         _watch = null;
@@ -198,11 +239,21 @@ class OrbitController extends AppController {
     if (sighting == null || isDisposed) return;
 
     final key = sighting.signal.identifier;
+    final isNew = _sightings[key]?.signal.at != sighting.signal.at;
     _sightings[key] = sighting;
     final rssi = sighting.rssi;
-    if (rssi != null && rssi < rssiThreshold) return;
+    if (rssi != null && rssi < rssiThreshold) {
+      if (isNew) _log('Longe demais para enviar: $rssi dBm');
+      return;
+    }
     final last = _lastSentAt[key];
-    if (last != null && sighting.at.difference(last) < cooldown) return;
+    if (last != null && sighting.at.difference(last) < cooldown) {
+      if (isNew) {
+        final wait = cooldown - sighting.at.difference(last);
+        _log('Já enviado; próximo envio em ${wait.inSeconds} s');
+      }
+      return;
+    }
     _lastSentAt[key] = sighting.at;
     await _report(sighting);
   }
@@ -248,16 +299,24 @@ class OrbitController extends AppController {
         } on ApiException catch (error) {
           if (!_isPermanent(error.statusCode)) {
             _offline = true;
+            _sendFailed(error.message);
             break;
           }
           result = EncounterStatus.failed;
           failure = error.message;
-        } catch (_) {
+        } catch (error) {
           // Sem internet (ou servidor fora do ar): fica na fila.
           _offline = true;
+          _sendFailed('$error');
           break;
         }
         _offline = false;
+        _sendError = failure;
+        _log(
+          failure == null
+              ? 'Enviado à central: ${nameOf(e.signal)}'
+              : 'Recusado pela central: $failure',
+        );
         _pending.removeAt(0);
         await queue.save(_pending);
         _record(e.withStatus(result, error: failure));
@@ -267,6 +326,11 @@ class OrbitController extends AppController {
       _flushing = false;
       notify();
     }
+  }
+
+  void _sendFailed(String message) {
+    _sendError = message;
+    _log('Envio falhou, fica na fila: $message');
   }
 
   /// Recusas que não mudam tentando de novo. 401 (sessão), 408 e 429 ficam

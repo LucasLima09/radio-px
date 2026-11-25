@@ -172,12 +172,31 @@ void main() {
     expect(controller.pendingCount, 0);
   });
 
+  test('o diagnóstico mostra cada etapa da detecção', () async {
+    await emit(lucas, -60, now);
+    final text = controller.logs.map((l) => l.message).join('\n');
+    expect(text, contains('Chave dos Orbits carregada'));
+    expect(text, contains('Escuta Bluetooth iniciada'));
+    expect(text, contains('(4/4) · -60 dBm'));
+    expect(text, contains('Assinatura válida: ${lucas.identifier}'));
+    expect(text, contains('Enviado à central: Orbit do Lucas'));
+    expect(controller.fragmentCount, 4);
+
+    await emit(ana, -95, now);
+    expect(controller.logs.first.message, contains('Longe demais'));
+    await emit(await FakeOrbit.create(seed: 9), -60, now);
+    expect(controller.logs.first.message, contains('assinatura inválida'));
+    controller.clearLogs();
+    expect(controller.logs, isEmpty);
+  });
+
   test('sem internet guarda e envia quando a conexão volta', () async {
     online = false;
     final raw = await emit(lucas, -60, now);
     expect(sent, isEmpty);
     expect(controller.pendingCount, 1);
     expect(controller.isOffline, isTrue);
+    expect(controller.sendError, isNotNull);
     expect(controller.encounters.single.queued, isTrue);
 
     online = true;

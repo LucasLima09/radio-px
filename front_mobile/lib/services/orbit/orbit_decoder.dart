@@ -12,7 +12,7 @@ import '../../models/orbit_encounter.dart';
 /// pedaços são do mesmo sinal. Só sai daqui o que, remontado, tem a assinatura
 /// da chave pública dos Orbits.
 class OrbitDecoder {
-  OrbitDecoder(List<int> publicKey)
+  OrbitDecoder(List<int> publicKey, {this.onLog})
     : _key = SimplePublicKey(publicKey, type: KeyPairType.ed25519);
 
   static const companyId = 0xFFFF;
@@ -30,6 +30,9 @@ class OrbitDecoder {
   static const _partialTtl = Duration(minutes: 1);
   static const _maxPartials = 64;
 
+  /// Avisa o que está acontecendo, para a tela de diagnóstico.
+  final void Function(String message)? onLog;
+
   final SimplePublicKey _key;
   final _algorithm = Ed25519();
   final _partials = <String, _Partial>{};
@@ -37,8 +40,12 @@ class OrbitDecoder {
   /// Hora do sinal mais novo já aceito de cada Orbit: um anterior é repetição.
   final _newest = <String, DateTime>{};
 
+  int _fragments = 0;
   int _valid = 0;
   int _rejected = 0;
+
+  /// Anúncios no formato dos Orbits, ainda sem conferir a assinatura.
+  int get fragmentCount => _fragments;
 
   /// Sinais distintos com assinatura válida.
   int get valid => _valid;
@@ -57,6 +64,7 @@ class OrbitDecoder {
         data[2] >= fragments) {
       return null;
     }
+    _fragments++;
     _partials.removeWhere((_, p) => ad.at.difference(p.lastAt) > _partialTtl);
     final tag = '${data[3]}.${data[4]}.${data[5]}';
     final partial = _partials.putIfAbsent(tag, () {
@@ -66,7 +74,12 @@ class OrbitDecoder {
       return _Partial();
     });
     partial.lastAt = ad.at;
-    partial.put(data[2], data.sublist(_header));
+    if (partial.put(data[2], data.sublist(_header))) {
+      onLog?.call(
+        'Pedaço ${data[2] + 1} recebido (${partial.count}/$fragments)'
+        '${ad.rssi == null ? '' : ' · ${ad.rssi} dBm'}',
+      );
+    }
 
     final bytes = partial.bytes;
     if (bytes == null) return null;
@@ -92,11 +105,22 @@ class OrbitDecoder {
         publicKey: _key,
       ),
     );
-    if (!ok || at.difference(signal.at).abs() > maxAge) {
+    if (!ok) {
       _rejected++;
+      onLog?.call('Recusado: assinatura inválida (${signal.identifier})');
+      return null;
+    }
+    final age = at.difference(signal.at);
+    if (age.abs() > maxAge) {
+      _rejected++;
+      onLog?.call(
+        'Recusado: hora do sinal difere ${age.inSeconds} s do celular '
+        '(${signal.identifier})',
+      );
       return null;
     }
     _valid++;
+    onLog?.call('Assinatura válida: ${signal.identifier}');
     return signal;
   }
 }
@@ -106,13 +130,17 @@ class _Partial {
   DateTime lastAt = DateTime.fromMillisecondsSinceEpoch(0);
   Future<OrbitSignal?>? result;
 
-  void put(int index, List<int> part) {
+  int get count => _parts.where((p) => p != null).length;
+
+  /// Devolve se o pedaço era novidade.
+  bool put(int index, List<int> part) {
     final current = _parts[index];
-    if (current != null && _equals(current, part)) return;
+    if (current != null && _equals(current, part)) return false;
     // Pedaço diferente com a mesma tag (ex.: um impostor): vale o último, e a
     // assinatura é conferida de novo.
     _parts[index] = part;
     result = null;
+    return true;
   }
 
   Uint8List? get bytes {

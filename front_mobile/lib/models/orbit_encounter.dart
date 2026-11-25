@@ -151,3 +151,11 @@ class OrbitEncounter {
     'rssi': ?rssi,
   };
 }
+
+/// Linha do diagnóstico na tela do Orbit.
+class OrbitLog {
+  const OrbitLog(this.at, this.message);
+
+  final DateTime at;
+  final String message;
+}

@@ -68,6 +68,23 @@ class OrbitScreen extends StatelessWidget {
         const SizedBox(height: 16),
         Text(controller.error!, style: const TextStyle(color: pxDanger)),
       ],
+      if (controller.sendError != null) ...[
+        const SizedBox(height: 16),
+        Text(
+          'Último envio: ${controller.sendError}',
+          style: const TextStyle(color: pxDanger),
+        ),
+      ],
+      if (controller.isDeaf) ...[
+        const SizedBox(height: 16),
+        const _Notice(
+          icon: Icons.bluetooth_disabled,
+          text:
+              'Nenhum sinal Bluetooth ouvido até agora. Confira se o '
+              'Bluetooth está ligado e se o Radio PX tem permissão de '
+              'Bluetooth nos ajustes do aparelho.',
+        ),
+      ],
       const SizedBox(height: 32),
       Text('Orbits por perto', style: titleStyle),
       const SizedBox(height: 8),
@@ -87,6 +104,27 @@ class OrbitScreen extends StatelessWidget {
       else
         for (final e in controller.encounters)
           _EncounterTile(name: controller.nameOf(e.signal), encounter: e),
+      const SizedBox(height: 32),
+      Row(
+        children: [
+          Expanded(child: Text('Detecção ao vivo', style: titleStyle)),
+          TextButton(
+            onPressed: controller.logs.isEmpty ? null : controller.clearLogs,
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+      if (controller.logs.isEmpty)
+        const Text('Nada ainda.', style: TextStyle(color: pxMuted))
+      else
+        for (final l in controller.logs)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '${_time(l.at)}  ${l.message}',
+              style: const TextStyle(color: pxMuted, fontSize: 13),
+            ),
+          ),
     ];
   }
 }
@@ -134,7 +172,13 @@ class _StatusCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            _line('Servidor', controller.api.baseUrl),
+            _line(
+              'Chave dos Orbits',
+              controller.hasKey ? 'carregada' : 'não carregada',
+            ),
             _line('Sinais BLE ouvidos', '${controller.heardCount}'),
+            _line('No formato Orbit', '${controller.fragmentCount}'),
             _line('Assinatura válida', '${controller.validCount}'),
             _line('Recusados', '${controller.rejectedCount}'),
             _line(
