@@ -22,8 +22,10 @@ class OrbitController extends AppController {
     required this.queue,
     OrbitScanner? scanner,
     OrbitKeyStore? keyStore,
+    DateTime Function()? now,
   }) : scanner = scanner ?? createOrbitScanner(),
-       _keyStore = keyStore ?? OrbitKeyStore(baseUrl: api.baseUrl);
+       _keyStore = keyStore ?? OrbitKeyStore(baseUrl: api.baseUrl),
+       _now = now ?? DateTime.now;
 
   final ApiClient api;
   final OrbitScanner scanner;
@@ -31,9 +33,7 @@ class OrbitController extends AppController {
   /// Encontros ainda não entregues, salvos no aparelho.
   final OrbitQueue queue;
   final OrbitKeyStore _keyStore;
-
-  /// Abaixo disso o sinal é fraco demais para contar como "passou perto".
-  static const rssiThreshold = -80;
+  final DateTime Function() _now;
 
   /// Intervalo mínimo entre dois envios do mesmo Orbit. Dois Orbits diferentes
   /// podem gerar envios no mesmo minuto.
@@ -74,6 +74,7 @@ class OrbitController extends AppController {
   int _heard = 0;
   String? _error;
   String? _sendError;
+  Duration _clockOffset = Duration.zero;
   DateTime? _watchingSince;
   final List<OrbitLog> _logs = [];
   final List<OrbitEncounter> _encounters = [];
@@ -97,6 +98,9 @@ class OrbitController extends AppController {
 
   /// O app tem a chave pública que confere as assinaturas.
   bool get hasKey => _key != null;
+
+  /// Quanto somar ao relógio do aparelho para chegar ao da central.
+  Duration get clockOffset => _clockOffset;
 
   /// Motivo da última entrega que não deu certo.
   String? get sendError => _sendError;
@@ -152,6 +156,7 @@ class OrbitController extends AppController {
     unawaited(flush());
     if (!isSupported) return;
     // Com a chave salva a escuta começa já, mesmo sem internet.
+    _clockOffset = await _keyStore.loadClockOffset();
     final saved = await _keyStore.load();
     if (saved != null) _useKey(saved);
     await load();
@@ -167,8 +172,10 @@ class OrbitController extends AppController {
     if (!silent) _error = null;
     notify();
     try {
+      final askedAt = _now();
       final config = await api.orbitConfig();
       if (isDisposed) return;
+      await _syncClock(config.serverTime, askedAt);
       _names = config.names;
       if (config.publicKey.isEmpty) {
         if (_key == null) {
@@ -190,6 +197,20 @@ class OrbitController extends AppController {
       _ready = true;
       notify();
     }
+  }
+
+  /// Um celular com a hora errada recusaria (e teria recusados) sinais
+  /// verdadeiros. A central é a referência de hora.
+  Future<void> _syncClock(DateTime? serverTime, DateTime askedAt) async {
+    if (serverTime == null) return;
+    // O servidor leu o relógio mais ou menos no meio da requisição.
+    final middle = askedAt.add(_now().difference(askedAt) ~/ 2);
+    final offset = serverTime.difference(middle);
+    if ((offset - _clockOffset).abs() > const Duration(seconds: 5)) {
+      _log('Relógio acertado pela central: ${offset.inSeconds} s');
+    }
+    _clockOffset = offset;
+    await _keyStore.saveClockOffset(offset);
   }
 
   void _useKey(List<int> key) {
@@ -235,17 +256,12 @@ class OrbitController extends AppController {
   Future<void> _onAdvertisement(OrbitAdvertisement ad) async {
     _heard++;
     _scheduleNotify();
-    final sighting = await _decoder?.add(ad);
+    final sighting = await _decoder?.add(ad.shifted(_clockOffset));
     if (sighting == null || isDisposed) return;
 
     final key = sighting.signal.identifier;
     final isNew = _sightings[key]?.signal.at != sighting.signal.at;
     _sightings[key] = sighting;
-    final rssi = sighting.rssi;
-    if (rssi != null && rssi < rssiThreshold) {
-      if (isNew) _log('Longe demais para enviar: $rssi dBm');
-      return;
-    }
     final last = _lastSentAt[key];
     if (last != null && sighting.at.difference(last) < cooldown) {
       if (isNew) {

@@ -183,10 +183,16 @@ class _StatusCard extends StatelessWidget {
             _line('Recusados', '${controller.rejectedCount}'),
             _line(
               'Regra',
-              'sinal ≥ ${OrbitController.rssiThreshold} dBm, '
-                  '1 envio por Orbit a cada '
+              '1 envio por Orbit a cada '
                   '${OrbitController.cooldown.inSeconds} s',
             ),
+            if (controller.clockOffset.inSeconds.abs() > 5)
+              _line(
+                'Relógio do celular',
+                '${controller.clockOffset.inSeconds.abs()} s '
+                    '${controller.clockOffset.isNegative ? 'adiantado' : 'atrasado'} '
+                    '(corrigido pela central)',
+              ),
             if (controller.pendingCount > 0)
               _line(
                 'Fila',

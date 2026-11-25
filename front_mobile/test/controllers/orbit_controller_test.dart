@@ -45,6 +45,7 @@ void main() {
   late List<int> serverKey;
   late ApiClient api;
   late DateTime now;
+  late DateTime? serverTime;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -55,6 +56,7 @@ void main() {
     online = true;
     serverKey = lucas.publicKey;
     now = DateTime.now();
+    serverTime = null;
     scanner = _FakeScanner();
     api =
         ApiClient(
@@ -68,6 +70,8 @@ void main() {
                   'publicKey': serverKey.isEmpty
                       ? null
                       : base64Encode(serverKey),
+                  if (serverTime != null)
+                    'serverTime': serverTime!.toUtc().toIso8601String(),
                   'orbits': [
                     {'identifier': lucas.identifier, 'name': 'Orbit do Lucas'},
                   ],
@@ -140,12 +144,8 @@ void main() {
     expect(controller.rejectedCount, 1);
   });
 
-  test('envia 1 vez por Orbit a cada intervalo e ignora sinal fraco', () async {
+  test('envia 1 vez por Orbit a cada intervalo, forte ou fraco', () async {
     await emit(lucas, -95, now);
-    expect(sent, isEmpty);
-    expect(controller.sightings, hasLength(1)); // ouvido, mas longe
-
-    await emit(lucas, -60, now);
     expect(sent, hasLength(1));
     await emit(lucas, -50, now.add(const Duration(seconds: 10)));
     expect(sent, hasLength(1));
@@ -182,12 +182,58 @@ void main() {
     expect(text, contains('Enviado à central: Orbit do Lucas'));
     expect(controller.fragmentCount, 4);
 
-    await emit(ana, -95, now);
-    expect(controller.logs.first.message, contains('Longe demais'));
     await emit(await FakeOrbit.create(seed: 9), -60, now);
     expect(controller.logs.first.message, contains('assinatura inválida'));
     controller.clearLogs();
     expect(controller.logs, isEmpty);
+  });
+
+  for (final skew in const [Duration(hours: 3), Duration(hours: -3)]) {
+    test(
+      'celular com a hora errada ($skew) é corrigido pela central',
+      () async {
+        final wrong = now.add(skew); // relógio do celular
+        serverTime = now;
+        final other = _FakeScanner();
+        final c = OrbitController(
+          api: api,
+          queue: OrbitQueue(userId: '3'),
+          scanner: other,
+          now: () => wrong,
+        );
+        await c.start();
+        expect(c.clockOffset.inSeconds, closeTo(-skew.inSeconds, 1));
+
+        // O Orbit assina com a hora certa; o celular o ouve com a hora errada.
+        final raw = await lucas.sign(now);
+        advertise(raw, wrong, rssi: -90).forEach(other.ads.add);
+        await settle();
+        expect(sent.single['signal'], base64Encode(raw));
+        final at = DateTime.parse(sent.single['at'] as String);
+        expect(at.difference(now).inSeconds.abs(), lessThan(2));
+        c.dispose();
+
+        // O acerto vale ao abrir sem internet.
+        online = false;
+        final offline = OrbitController(
+          api: api,
+          queue: OrbitQueue(userId: '3'),
+          scanner: _FakeScanner(),
+          now: () => wrong,
+        );
+        await offline.start();
+        expect(offline.clockOffset.inSeconds, closeTo(-skew.inSeconds, 1));
+        offline.dispose();
+      },
+    );
+  }
+
+  test('sem o acerto, hora errada é recusada', () async {
+    final raw = await ana.sign(now);
+    advertise(raw, now.add(const Duration(hours: 3))).forEach(scanner.ads.add);
+    await settle();
+    expect(sent, isEmpty);
+    expect(controller.logs.first.message, contains('hora do sinal difere'));
   });
 
   test('sem internet guarda e envia quando a conexão volta', () async {
