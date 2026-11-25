@@ -20,6 +20,9 @@ type radio struct {
 	adapter dbus.BusObject
 	onAir   []dbus.ObjectPath
 	next    int
+	// capacity é quantos anúncios o adaptador mantém ao mesmo tempo.
+	capacity int
+	copies   int
 }
 
 func openRadio(adapter string) (*radio, error) {
@@ -37,25 +40,52 @@ func openRadio(adapter string) (*radio, error) {
 		conn.Close()
 		return nil, fmt.Errorf("o Bluetooth (%s) está desligado", adapter)
 	}
-	if _, err := r.adapter.GetProperty(adManagerIface + ".SupportedInstances"); err != nil {
+	free, err := r.adapter.GetProperty(adManagerIface + ".SupportedInstances")
+	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("o adaptador %s não transmite anúncios BLE: %w", adapter, err)
 	}
+	n, _ := free.Value().(byte)
+	r.capacity = int(n)
+	if r.capacity < orbit.FragmentCount {
+		conn.Close()
+		return nil, fmt.Errorf("o adaptador %s só tem %d anúncios livres, são precisos %d (há outro orbit-sim rodando?)",
+			adapter, r.capacity, orbit.FragmentCount)
+	}
+	// Uma leva fica de reserva para a troca de sinal.
+	r.copies = min(max(r.capacity/orbit.FragmentCount-1, 1), 2)
 	return r, nil
 }
 
-// Transmit põe os anúncios no ar e só depois tira os anteriores, para não
-// haver intervalo em silêncio na troca de sinal.
+// Transmit põe os anúncios no ar no lugar dos anteriores. Cada um vai em
+// [radio.copies] instâncias: o BlueZ repete cada instância só a cada ~1,28 s e
+// não deixa mudar isso, e o celular escuta apenas parte do tempo.
 func (r *radio) Transmit(fragments [][]byte) error {
 	previous := r.onAir
+	if len(previous)+len(fragments) > r.capacity {
+		if err := r.unregister(previous); err != nil {
+			return err
+		}
+		previous = nil
+	}
 	r.onAir = nil
-	for _, data := range fragments {
-		if err := r.register(data); err != nil {
-			r.onAir = append(r.onAir, previous...)
-			return fmt.Errorf("transmitindo anúncio: %w", err)
+	// Os novos entram antes de os antigos saírem, para não haver silêncio. A
+	// cópia extra vem depois, quando os antigos já liberaram as instâncias.
+	for i := range r.copies {
+		for _, data := range fragments {
+			if err := r.register(data); err != nil {
+				r.onAir = append(r.onAir, previous...)
+				return fmt.Errorf("transmitindo anúncio: %w", err)
+			}
+		}
+		if i == 0 {
+			if err := r.unregister(previous); err != nil {
+				return err
+			}
+			previous = nil
 		}
 	}
-	return r.unregister(previous)
+	return nil
 }
 
 func (r *radio) register(data []byte) error {

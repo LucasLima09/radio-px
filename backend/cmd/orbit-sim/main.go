@@ -32,7 +32,7 @@ func run() error {
 	lat := flag.Float64("lat", -28.4507437, "latitude transmitida")
 	lng := flag.Float64("lng", -52.199568, "longitude transmitida")
 	id := flag.String("id", "", "id do Orbit, 16 dígitos hexadecimais (padrão: o salvo na identidade)")
-	every := flag.Duration("every", 10*time.Second, "intervalo entre sinais novos")
+	every := flag.Duration("every", 30*time.Second, "intervalo entre sinais novos")
 	adapter := flag.String("adapter", "hci0", "adaptador Bluetooth")
 	forge := flag.Bool("forge", false, "assina com uma chave falsa, para testar a recusa no app")
 	dryRun := flag.Bool("dry-run", false, "só mostra um sinal, sem transmitir")
@@ -46,8 +46,8 @@ func run() error {
 	if *lat < -90 || *lat > 90 || *lng < -180 || *lng > 180 {
 		return errors.New("latitude ou longitude fora do limite")
 	}
-	if *every < time.Second {
-		return errors.New("-every precisa ser de pelo menos 1s")
+	if *every < 5*time.Second || *every > time.Minute {
+		return errors.New("-every precisa ser de 5s a 1m")
 	}
 
 	device, key, err := loadIdentity(*file)
@@ -112,7 +112,7 @@ func run() error {
 		if err := radio.Transmit(fragments); err != nil {
 			return err
 		}
-		fmt.Printf("%s  sinal no ar (%d anúncios)\n", s.At.Format("15:04:05"), len(fragments))
+		fmt.Printf("%s  sinal no ar (%d anúncios × %d)\n", s.At.Format("15:04:05"), len(fragments), radio.copies)
 		select {
 		case <-ctx.Done():
 			fmt.Println("\nEncerrado.")
