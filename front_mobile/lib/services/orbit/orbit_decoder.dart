@@ -23,10 +23,6 @@ class OrbitDecoder {
   static const _chunk = 21;
   static const _context = 'radiopx-orbit-v1';
 
-  /// Quanto a hora do sinal pode diferir do relógio do aparelho. Um sinal
-  /// gravado e retransmitido depois chega velho. A central usa o mesmo limite.
-  static const maxAge = Duration(minutes: 2);
-
   static const _partialTtl = Duration(minutes: 1);
   static const _maxPartials = 64;
 
@@ -50,11 +46,11 @@ class OrbitDecoder {
   /// Sinais distintos com assinatura válida.
   int get valid => _valid;
 
-  /// Sinais remontados com assinatura inválida ou hora fora do limite.
+  /// Sinais remontados com assinatura inválida.
   int get rejected => _rejected;
 
-  /// Processa um anúncio. Devolve o sinal quando ele está completo, assinado e
-  /// atual; um anúncio repetido de um sinal já aceito o devolve de novo, com o
+  /// Processa um anúncio. Devolve o sinal quando ele está completo e
+  /// assinado. A hora do celular não conta. Um anúncio repetido de um sinal já aceito o devolve de novo, com o
   /// RSSI novo.
   Future<OrbitSighting?> add(OrbitAdvertisement ad) async {
     final data = ad.data;
@@ -85,18 +81,16 @@ class OrbitDecoder {
     if (bytes == null) return null;
     // Guardado antes do await: os anúncios que chegam durante a conferência
     // esperam o mesmo resultado.
-    final signal = await (partial.result ??= _open(bytes, ad.at));
+    final signal = await (partial.result ??= _open(bytes));
     if (signal == null) return null;
 
     final newest = _newest[signal.identifier];
     if (newest != null && signal.at.isBefore(newest)) return null;
     _newest[signal.identifier] = signal.at;
-    // Continua no ar depois de vencer: deixa de valer.
-    if (ad.at.difference(signal.at).abs() > maxAge) return null;
     return OrbitSighting(signal: signal, at: ad.at, rssi: ad.rssi);
   }
 
-  Future<OrbitSignal?> _open(Uint8List bytes, DateTime at) async {
+  Future<OrbitSignal?> _open(Uint8List bytes) async {
     final signal = OrbitSignal.parse(bytes);
     final ok = await _algorithm.verify(
       [...utf8.encode(_context), ...bytes.sublist(0, OrbitSignal.bodySize)],
@@ -108,15 +102,6 @@ class OrbitDecoder {
     if (!ok) {
       _rejected++;
       onLog?.call('Recusado: assinatura inválida (${signal.identifier})');
-      return null;
-    }
-    final age = at.difference(signal.at);
-    if (age.abs() > maxAge) {
-      _rejected++;
-      onLog?.call(
-        'Recusado: hora do sinal difere ${age.inSeconds} s do celular '
-        '(${signal.identifier})',
-      );
       return null;
     }
     _valid++;

@@ -77,20 +77,13 @@ void main() {
     expect(decoder.rejected, 1);
   });
 
-  test('recusa sinal gravado e retransmitido depois', () async {
+  test('a hora do celular não conta', () async {
     final raw = await orbit.sign(now);
-    final later = now.add(const Duration(minutes: 3));
-    expect(await feed(advertise(raw, later)), isNull);
-    expect(decoder.rejected, 1);
-  });
-
-  test('um sinal que continua no ar deixa de valer ao vencer', () async {
-    final raw = await orbit.sign(now);
-    expect(await feed(advertise(raw, now)), isNotNull);
-    expect(
-      await feed(advertise(raw, now.add(const Duration(seconds: 121)))),
-      isNull,
-    );
+    for (final skew in const [Duration(hours: 5), Duration(hours: -5)]) {
+      decoder = OrbitDecoder(orbit.publicKey);
+      expect(await feed(advertise(raw, now.add(skew))), isNotNull);
+    }
+    expect(decoder.rejected, 0);
   });
 
   test('ignora sinal anterior ao mais novo já aceito', () async {

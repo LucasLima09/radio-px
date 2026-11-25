@@ -6,10 +6,6 @@ import 'dart:typed_data';
 class OrbitAdvertisement {
   const OrbitAdvertisement({required this.data, required this.at, this.rssi});
 
-  /// O mesmo anúncio com a hora corrigida.
-  OrbitAdvertisement shifted(Duration offset) =>
-      OrbitAdvertisement(data: data, at: at.add(offset), rssi: rssi);
-
   final List<int> data;
   final DateTime at;
 
@@ -77,11 +73,7 @@ class OrbitSighting {
 
 /// O que o app precisa do servidor para reconhecer os Orbits.
 class OrbitConfig {
-  const OrbitConfig({
-    required this.publicKey,
-    required this.names,
-    this.serverTime,
-  });
+  const OrbitConfig({required this.publicKey, required this.names});
 
   factory OrbitConfig.fromJson(Map<String, dynamic> json) => OrbitConfig(
     publicKey: base64Decode(json['publicKey'] as String? ?? ''),
@@ -90,7 +82,6 @@ class OrbitConfig {
         (o as Map<String, dynamic>)['identifier'] as String:
             o['name'] as String,
     },
-    serverTime: DateTime.tryParse(json['serverTime'] as String? ?? ''),
   );
 
   /// Chave pública Ed25519; vazia se o servidor não tem uma configurada.
@@ -98,9 +89,6 @@ class OrbitConfig {
 
   /// Nome de cada Orbit conhecido, só para exibição.
   final Map<String, String> names;
-
-  /// Relógio da central, para corrigir um celular com a hora errada.
-  final DateTime? serverTime;
 }
 
 enum EncounterStatus {
