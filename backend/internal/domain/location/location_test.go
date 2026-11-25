@@ -17,7 +17,7 @@ func TestNewEncounter(t *testing.T) {
 	rssi := -60
 	// Ficou 2 h na fila do app sem internet.
 	at := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
-	loc, err := NewEncounter(uuid.New(), signalAt(at), o, &rssi, at.Add(5*time.Second))
+	loc, err := NewEncounter(uuid.New(), signalAt(at), o, &rssi)
 	if err != nil {
 		t.Fatalf("NewEncounter: %v", err)
 	}
@@ -45,22 +45,19 @@ func TestNewEncounterRejects(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-31 * 24 * time.Hour)
 	cases := []struct {
-		name       string
-		signal     orbit.Signal
-		rssi       *int
-		receivedAt time.Time
-		want       error
+		name   string
+		signal orbit.Signal
+		rssi   *int
+		want   error
 	}{
-		{"latitude", orbit.Signal{At: now, Latitude: 91}, nil, now, ErrInvalidCoord},
-		{"longitude", orbit.Signal{At: now, Longitude: -181}, nil, now, ErrInvalidCoord},
-		{"rssi", signalAt(now), &bad, now, ErrInvalidRSSI},
-		{"futuro", signalAt(now.Add(time.Hour)), nil, now.Add(time.Hour), ErrInvalidTime},
-		{"velho demais", signalAt(old), nil, old, ErrInvalidTime},
-		{"retransmitido", signalAt(now.Add(-3 * time.Minute)), nil, now, ErrInvalidTime},
-		{"retransmitido sem hora", signalAt(now.Add(-3 * time.Minute)), nil, time.Time{}, ErrInvalidTime},
+		{"latitude", orbit.Signal{At: now, Latitude: 91}, nil, ErrInvalidCoord},
+		{"longitude", orbit.Signal{At: now, Longitude: -181}, nil, ErrInvalidCoord},
+		{"rssi", signalAt(now), &bad, ErrInvalidRSSI},
+		{"futuro", signalAt(now.Add(time.Hour)), nil, ErrInvalidTime},
+		{"velho demais", signalAt(old), nil, ErrInvalidTime},
 	}
 	for _, c := range cases {
-		if _, err := NewEncounter(uuid.New(), c.signal, o, c.rssi, c.receivedAt); err != c.want {
+		if _, err := NewEncounter(uuid.New(), c.signal, o, c.rssi); err != c.want {
 			t.Fatalf("%s: got %v, want %v", c.name, err, c.want)
 		}
 	}

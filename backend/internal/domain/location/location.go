@@ -20,9 +20,6 @@ var (
 const (
 	MaxEncounterAge = 30 * 24 * time.Hour
 	MaxClockSkew    = 5 * time.Minute
-	// MaxSignalAge é quanto a hora do sinal pode diferir da hora em que o app
-	// o ouviu. O app usa o mesmo limite.
-	MaxSignalAge = 2 * time.Minute
 )
 
 type Location struct {
@@ -59,11 +56,10 @@ func New(userID uuid.UUID, channelID *uuid.UUID, latitude, longitude float64) (*
 }
 
 // NewEncounter registra o sinal de um Orbit recebido pelo app. Posição e hora
-// vêm do sinal assinado, não do aparelho do motorista. receivedAt é quando o
-// app ouviu o sinal (pode ser antigo, se ficou na fila sem internet); zero
-// significa agora. rssi é opcional: nem todo navegador expõe a intensidade.
-func NewEncounter(userID uuid.UUID, s orbit.Signal, o *orbit.Orbit, rssi *int, receivedAt time.Time) (*Location, error) {
-	if err := ValidateEncounter(s, rssi, receivedAt); err != nil {
+// vêm do sinal assinado, não do aparelho do motorista. rssi é opcional: nem todo
+// navegador expõe a intensidade.
+func NewEncounter(userID uuid.UUID, s orbit.Signal, o *orbit.Orbit, rssi *int) (*Location, error) {
+	if err := ValidateEncounter(s, rssi); err != nil {
 		return nil, err
 	}
 	orbitID := o.ID
@@ -80,8 +76,9 @@ func NewEncounter(userID uuid.UUID, s orbit.Signal, o *orbit.Orbit, rssi *int, r
 	}, nil
 }
 
-// ValidateEncounter confere o sinal antes de o Orbit ser criado no banco.
-func ValidateEncounter(s orbit.Signal, rssi *int, receivedAt time.Time) error {
+// ValidateEncounter confere o sinal antes de o Orbit ser criado no banco. A hora
+// é só a do Orbit contra a da central: o relógio do celular não conta.
+func ValidateEncounter(s orbit.Signal, rssi *int) error {
 	if err := validateCoords(s.Latitude, s.Longitude); err != nil {
 		return err
 	}
@@ -89,14 +86,7 @@ func ValidateEncounter(s orbit.Signal, rssi *int, receivedAt time.Time) error {
 		return ErrInvalidRSSI
 	}
 	now := time.Now().UTC()
-	if receivedAt.IsZero() {
-		receivedAt = now
-	}
 	if s.At.After(now.Add(MaxClockSkew)) || s.At.Before(now.Add(-MaxEncounterAge)) {
-		return ErrInvalidTime
-	}
-	// Um sinal gravado e retransmitido depois chega com a hora velha.
-	if receivedAt.Sub(s.At).Abs() > MaxSignalAge {
 		return ErrInvalidTime
 	}
 	return nil

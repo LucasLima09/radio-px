@@ -83,7 +83,7 @@ func TestReportSignal(t *testing.T) {
 		{"posição adulterada", map[string]any{"signal": tampered}, http.StatusUnprocessableEntity},
 		{"orbit desativado", map[string]any{"signal": signal(blocked, now, -23.5, key)}, http.StatusUnprocessableEntity},
 		{"coordenada inválida", map[string]any{"signal": signal(device, now, -123.5, key)}, http.StatusBadRequest},
-		{"sinal retransmitido", map[string]any{"signal": signal(device, now.Add(-10*time.Minute), -23.5, key)}, http.StatusBadRequest},
+		{"hora do Orbit no futuro", map[string]any{"signal": signal(device, now.Add(time.Hour), -23.5, key)}, http.StatusBadRequest},
 		{"coordenada solta é ignorada", map[string]any{"lat": -23.5, "lng": -46.6}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
@@ -116,8 +116,8 @@ func TestReportSignal(t *testing.T) {
 	}
 }
 
-// Encontro que ficou na fila sem internet: chega depois, com a hora em que foi
-// ouvido e o id gerado no app.
+// Encontro que ficou na fila sem internet, em um celular com a hora errada: vale
+// a hora do Orbit.
 func TestReportQueuedSignal(t *testing.T) {
 	key := privateKey(1)
 	locations := &savedLocations{}
@@ -129,7 +129,7 @@ func TestReportQueuedSignal(t *testing.T) {
 	res := report(t, h, &user.User{ID: uuid.New()}, map[string]any{
 		"id":     id,
 		"signal": orbit.Signal{At: at, Latitude: 1, Longitude: 2}.Sign(key),
-		"at":     at.Add(3 * time.Second),
+		"at":     at.Add(26 * time.Hour),
 	})
 
 	if res.Code != http.StatusNoContent {

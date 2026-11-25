@@ -30,8 +30,8 @@ type reportLocationRequest struct {
 	// Signal são os 84 bytes assinados que o Orbit transmitiu, em base64.
 	Signal []byte `json:"signal"`
 	RSSI   *int   `json:"rssi"`
-	// At é a hora em que o app ouviu o sinal (RFC 3339). Sem ela, vale a hora
-	// de chegada.
+	// At é a hora do celular ao ouvir o sinal (RFC 3339). Aceita, mas ignorada:
+	// vale a hora assinada pelo Orbit.
 	At *time.Time `json:"at"`
 }
 
@@ -65,11 +65,7 @@ func (h *LocationHandler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var at time.Time
-	if req.At != nil {
-		at = *req.At
-	}
-	err = location.ValidateEncounter(signal, req.RSSI, at)
+	err = location.ValidateEncounter(signal, req.RSSI)
 	if errors.Is(err, location.ErrInvalidTime) {
 		writeError(w, http.StatusBadRequest, "Hora do sinal fora do limite.")
 		return
@@ -89,7 +85,7 @@ func (h *LocationHandler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loc, err := location.NewEncounter(u.ID, signal, o, req.RSSI, at)
+	loc, err := location.NewEncounter(u.ID, signal, o, req.RSSI)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Sinal de Orbit inválido.")
 		return
