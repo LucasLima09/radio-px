@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -30,6 +31,9 @@ type appOrbitsResponse struct {
 	// PublicKey em base64; vazia se o servidor não tem ORBIT_PUBLIC_KEY.
 	PublicKey []byte             `json:"publicKey"`
 	Orbits    []appOrbitResponse `json:"orbits"`
+	// ServerTime deixa o app corrigir um celular com a hora errada: a hora do
+	// sinal precisa bater com a hora em que ele foi ouvido.
+	ServerTime time.Time `json:"serverTime"`
 }
 
 // Config devolve ao app a chave pública e os nomes dos Orbits conhecidos. Os
@@ -40,7 +44,7 @@ func (h *OrbitHandler) Config(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	out := appOrbitsResponse{PublicKey: h.key, Orbits: make([]appOrbitResponse, 0, len(list))}
+	out := appOrbitsResponse{PublicKey: h.key, Orbits: make([]appOrbitResponse, 0, len(list)), ServerTime: time.Now().UTC()}
 	for _, o := range list {
 		out.Orbits = append(out.Orbits, appOrbitResponse{Name: o.Name, Identifier: o.Identifier})
 	}
